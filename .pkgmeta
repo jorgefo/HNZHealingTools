@@ -1,0 +1,24 @@
+# BigWigsMods/packager config for automated releases.
+# https://github.com/BigWigsMods/packager
+#
+# When this repo is tagged (e.g. `git tag v1.1.0 && git push --tags`), the
+# GitHub Actions workflow in .github/workflows/release.yml runs the packager,
+# which reads this file to know what to include and exclude, then attaches the
+# resulting zip to a GitHub Release. If CurseForge / Wago / WoWInterface API
+# tokens are set as repo secrets, it also uploads to those platforms.
+
+package-as: HNZHealingTools
+
+# Skip the alternative "no library" variant — this addon ships no libs.
+enable-nolib-creation: no
+
+# Use the existing CHANGELOG.md instead of auto-generating one from commits.
+manual-changelog: CHANGELOG.md
+
+# Exclude dev artifacts from the released zip.
+ignore:
+  - .github
+  - .gitignore
+  - .pkgmeta
+  - Build-Package.ps1
+  - dist

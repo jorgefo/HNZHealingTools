@@ -1,0 +1,15 @@
+# Build output
+dist/
+
+# Claude Code session data
+.claude/
+memory/
+
+# OS artifacts
+Thumbs.db
+.DS_Store
+
+# Editor backups
+*.bak
+*~
+*.swp

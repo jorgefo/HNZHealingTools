@@ -1,0 +1,32 @@
+name: Package and release
+
+# Runs when a tag matching v* is pushed. Build the addon and attach the zip
+# to a GitHub Release. Optionally publishes to CurseForge / Wago / WoWInterface
+# if their API tokens are configured as repo secrets (see README in BigWigsMods/packager).
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write   # required so the packager can create the Release
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # packager reads tag history for changelog generation
+
+      - name: Run packager
+        uses: BigWigsMods/packager@v2
+        env:
+          # GitHub release: provided automatically, no setup needed.
+          GITHUB_OAUTH: ${{ secrets.GITHUB_TOKEN }}
+
+          # Optional: add these as Settings -> Secrets to enable platform uploads.
+          # CF_API_KEY:     ${{ secrets.CF_API_KEY }}
+          # WAGO_API_TOKEN: ${{ secrets.WAGO_API_TOKEN }}
+          # WOWI_API_TOKEN: ${{ secrets.WOWI_API_TOKEN }}

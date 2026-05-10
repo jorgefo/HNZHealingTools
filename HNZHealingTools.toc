@@ -1,0 +1,29 @@
+## Interface: 120001
+## Title: HNZ Healing Tools
+## Notes: Combat HUD: cursor icons, character ring auras, central pulse, cursor ring & cast progress
+## Author: fo
+## Version: 1.1.0
+## SavedVariables: HNZHealingToolsDB
+## SavedVariablesPerCharacter: HNZHealingToolsCharDB
+## IconTexture: Interface\Icons\Spell_Arcane_Rune
+
+Locales\Locales.lua
+Locales\enUS.lua
+Locales\deDE.lua
+Locales\esES.lua
+Locales\frFR.lua
+Locales\koKR.lua
+Locales\ptBR.lua
+Locales\ruRU.lua
+Locales\zhCN.lua
+Core.lua
+Utils.lua
+SpellMonitor.lua
+AuraMonitor.lua
+CursorDisplay.lua
+RingDisplay.lua
+CooldownPulse.lua
+CursorRing.lua
+MrtTimeline.lua
+Config.lua
+Minimap.lua

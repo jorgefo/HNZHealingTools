@@ -1,0 +1,184 @@
+local _, ns = ...
+
+-- 简体中文翻译 (zhCN)。键为 ns.L[...] 中使用的英文 UI 文本。
+-- 缺失的键会通过 Locales.lua 中的 metatable 回退到英文。
+ns.RegisterLocale("zhCN", {
+    -- ===== 错误 / 反馈消息 =====
+    ["Spell not found: "] = "未找到法术：",
+    [" already monitored."] = " 已被监控。",
+    ["Enter a name/ID."] = "请输入名称/ID。",
+    ["Enter a name."] = "请输入名称。",
+    ["Already exists."] = "已存在。",
+    ["Created: "] = "已创建：",
+    ["Can't copy to itself."] = "无法复制到自身。",
+    ["Copied from "] = "复制自 ",
+    ["Give the profile a name."] = "请为配置文件命名。",
+    ["Paste the exported string in the box."] = "请将导出字符串粘贴到框中。",
+    ["Imported as: "] = "已导入为：",
+    ["Import failed."] = "导入失败。",
+    ["Ready: Ctrl+C to copy"] = "就绪：Ctrl+C 复制",
+    ["No active profile to export"] = "没有可导出的活动配置文件",
+
+    -- ===== 通用按钮 =====
+    ["Save"] = "保存",
+    ["Cancel"] = "取消",
+    ["Add"] = "添加",
+    ["Update"] = "更新",
+    ["Close"] = "关闭",
+    ["Edit"] = "编辑",
+    ["Test"] = "测试",
+    ["Create"] = "创建",
+    ["Load"] = "加载",
+    ["Export"] = "导出",
+    ["Import"] = "导入",
+    ["Copy to current"] = "复制到当前",
+
+    -- ===== 标签页 / 页面标题 =====
+    ["Cursor Spells"] = "光标法术",
+    ["Cursor Auras"] = "光标光环",
+    ["Ring Auras"] = "环形光环",
+    ["Cursor Config"] = "光标配置",
+    ["Ring Config"] = "环形配置",
+    ["Profiles"] = "配置文件",
+
+    -- ===== 编辑器：标题与标签 =====
+    ["Cursor Spell"] = "光标法术",
+    ["Cursor Aura"] = "光标光环",
+    ["Ring Aura"] = "环形光环",
+    ["New Cursor Spell"] = "新建光标法术",
+    ["New Cursor Aura"] = "新建光标光环",
+    ["New Ring Aura"] = "新建环形光环",
+    ["Editing: "] = "编辑中：",
+    ["Spell name or ID:"] = "法术名称或 ID：",
+    ["Aura name or ID:"] = "光环名称或 ID：",
+    ["Show only when charges >=  (0=always):"] = "仅当充能 >=  时显示（0=始终）：",
+    ["Stack text size (0=default):"] = "层数文字大小（0=默认）：",
+    ["Hide while on cooldown"] = "冷却中时隐藏",
+    ["Hide status overlay"] = "隐藏状态覆盖",
+    ["Hide cooldown / duration timer"] = "隐藏冷却/持续时间计时器",
+    ["Hide timer"] = "隐藏计时器",
+    ["Specs:"] = "专精：",
+    ["Required talent:"] = "所需天赋：",
+    ["Unit:"] = "单位：",
+    ["Type:"] = "类型：",
+    ["Show:"] = "显示：",
+    ["Min stacks:"] = "最小层数：",
+    ["Duration (sec, 0=auto):"] = "持续时间（秒，0=自动）：",
+    ["Color:"] = "颜色：",
+    ["Show icon on ring"] = "在环上显示图标",
+    ["Play sound on activation"] = "激活时播放声音",
+    ["Pulse icon at screen center on ready"] = "就绪时在屏幕中央脉冲显示图标",
+    ["Pulse icon at screen center on activation"] = "激活时在屏幕中央脉冲显示图标",
+    ["Play sound on ready"] = "就绪时播放声音",
+    ["Pulse Display Settings"] = "脉冲显示设置",
+    ["Pulse Config"] = "脉冲",
+    ["Size & Timing"] = "大小和时长",
+    ["Hold Duration"] = "持续时间",
+    ["Enable cooldown pulse"] = "启用冷却脉冲",
+    ["Show anchor"] = "显示锚点",
+    ["Hide anchor"] = "隐藏锚点",
+    ["Test pulse"] = "测试脉冲",
+    ["Drag to move"] = "拖动以移动",
+
+    -- ===== TalentPicker =====
+    ["[No talent]"] = "[无天赋]",
+    ["Select a talent"] = "选择天赋",
+    ["search"] = "搜索",
+    ["(no talents in this loadout)"] = "（此配置中没有天赋）",
+
+    -- ===== SoundPicker =====
+    ["Select a sound"] = "选择声音",
+
+    -- ===== DropZone =====
+    ["Drag a spell here"] = "将法术拖到此处",
+
+    -- ===== 下拉菜单：单位 / 过滤 / showWhen =====
+    ["Target"] = "目标",
+    ["Player"] = "玩家",
+    ["Focus"] = "焦点",
+    ["Mouseover"] = "鼠标悬停",
+    ["Pet"] = "宠物",
+    ["Buff"] = "增益",
+    ["Debuff"] = "减益",
+    ["Always"] = "始终",
+    ["Only missing"] = "仅当缺失",
+    ["Only active"] = "仅当激活",
+    ["Active only"] = "仅当激活",
+    ["Missing only"] = "仅当缺失",
+    ["Below stacks"] = "低于层数",
+
+    -- ===== 列表行（标签）=====
+    ["Unknown"] = "未知",
+    ["Min:"] = "最小：",
+    ["Hide CD"] = "隐藏CD",
+    ["Talent"] = "天赋",
+    ["[icon]"] = "[图标]",
+
+    -- ===== 空状态 / 提示 =====
+    ["No spells. Use 'Add Cursor Spell...' below."] = "没有法术。请使用下方的“添加光标法术…”。",
+    ["No auras. Use 'Add Cursor Aura...' below."] = "没有光环。请使用下方的“添加光标光环…”。",
+    ["No ring auras. Use 'Add Ring Aura...' below."] = "没有环形光环。请使用下方的“添加环形光环…”。",
+    ["Spells shown as icons near the mouse cursor. Click the gear to edit."] = "法术以图标形式显示在鼠标光标附近。点击齿轮编辑。",
+    ["Auras shown as icons near the mouse cursor. Click the gear to edit."] = "光环以图标形式显示在鼠标光标附近。点击齿轮编辑。",
+    ["Auras shown as circular rings around the character. Click the gear to edit, click color to change."] = "光环以环形显示在角色周围。点击齿轮编辑，点击颜色可更改。",
+    ["Add Cursor Spell..."] = "添加光标法术…",
+    ["Add Cursor Aura..."] = "添加光标光环…",
+    ["Add Ring Aura..."] = "添加环形光环…",
+    ["or drag a spell here:"] = "或将法术拖到此处：",
+
+    -- ===== 光标设置页 =====
+    ["Cursor Display Settings"] = "光标显示设置",
+    ["Size & Layout"] = "大小与布局",
+    ["Icon Size"] = "图标大小",
+    ["Icon Spacing"] = "图标间距",
+    ["Max Columns"] = "最大列数",
+    ["Font Size"] = "字体大小",
+    ["Position"] = "位置",
+    ["Offset X"] = "X 偏移",
+    ["Offset Y"] = "Y 偏移",
+    ["Opacity"] = "不透明度",
+    ["Update Interval"] = "更新间隔",
+    ["Show only in combat"] = "仅在战斗中显示",
+    ["Enable cursor display"] = "启用光标显示",
+
+    -- ===== 环形设置页 =====
+    ["Ring Display Settings"] = "环形显示设置",
+    ["Size"] = "大小",
+    ["Base Radius"] = "基础半径",
+    ["Ring Thickness"] = "环的粗细",
+    ["Ring Spacing"] = "环的间距",
+    ["Appearance"] = "外观",
+    ["Segments (smooth)"] = "分段（平滑）",
+    ["Enable ring display"] = "启用环形显示",
+
+    -- ===== 配置文件页 =====
+    ["Profile Manager"] = "配置文件管理器",
+    ["Active: "] = "当前：",
+    ["(active)"] = "（当前）",
+    ["Create New Profile"] = "新建配置文件",
+    ["Copy From Profile"] = "从配置文件复制",
+    ["Export Current Profile"] = "导出当前配置文件",
+    ["(Press Export then Ctrl+C in the box)"] = "（按导出，然后在框中按 Ctrl+C）",
+    ["Import Profile"] = "导入配置文件",
+    ["Name:"] = "名称：",
+    ["(paste below and press Import)"] = "（粘贴到下方并按导入）",
+
+    -- ===== 小地图提示 =====
+    ["Left click:"] = "左键：",
+    ["Right click:"] = "右键：",
+    ["Drag:"] = "拖动：",
+    ["open/close config"] = "打开/关闭配置",
+    ["toggle cursor + ring icons"] = "切换光标+环形图标",
+    ["move icon"] = "移动图标",
+
+    -- ===== 加载消息 =====
+    ["loaded"] = "已加载",
+    ["Profile:"] = "配置文件：",
+    ["Type"] = "输入",
+    ["for options"] = "查看选项",
+
+    -- ===== 天赋树标签 =====
+    ["Class"] = "职业",
+    ["Hero"] = "英雄",
+    -- "Spec" 保持原样。
+})
