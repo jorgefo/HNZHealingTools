@@ -280,6 +280,7 @@ ns.RegisterLocale("esES", {
     ["Optional libraries"] = "Librerías opcionales",
     ["Inspiration for the cursor ring's trail and sparkle effects."] = "Inspiración para los efectos de estela y destellos del anillo del cursor.",
     ["Inspiration for the central cooldown pulse module."] = "Inspiración para el módulo de pulse central de cooldowns.",
+    ["Inspiration for the config window's UI theming and palette."] = "Inspiración para el tema visual y la paleta de la ventana de configuración.",
     ["Source format for raid note timeline reminders."] = "Formato fuente para los recordatorios de timeline de notas de raid.",
     ["Alternative timeline format supported by the MRT / NSRT module."] = "Formato alternativo de timeline soportado por el módulo MRT / NSRT.",
     ["Classic WeakAuras (no longer available)"] = "WeakAuras clásicos (ya no disponibles)",

@@ -3071,6 +3071,11 @@ local function BuildCreditsPage(p)
         "https://www.curseforge.com/wow/addons/cdpulse"
     )
     AddEntry(
+        "DandersFrames",
+        ns.L["Inspiration for the config window's UI theming and palette."],
+        "https://www.curseforge.com/wow/addons/dandersframes"
+    )
+    AddEntry(
         "Method Raid Tools (MRT)",
         ns.L["Source format for raid note timeline reminders."],
         "https://www.curseforge.com/wow/addons/method-raid-tools"
