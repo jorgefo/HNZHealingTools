@@ -1,7 +1,7 @@
 # Build output
 dist/
 
-# Claude Code session data
+# Tooling session data
 .claude/
 memory/
 

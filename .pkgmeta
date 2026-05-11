@@ -9,6 +9,15 @@
 
 package-as: HNZHealingTools
 
+# IDs de los proyectos en cada plataforma. El packager los usa para subir el
+# zip al proyecto correcto. Sacalos del URL/settings de cada proyecto:
+#   CurseForge: pagina del proyecto -> About this Project -> Project ID (numero)
+#   Wago:       Project Settings -> Wago ID (string alfanumerico)
+# Descomenta y completa cuando los tengas — mientras esten comentados, esa
+# plataforma se skipea silenciosamente sin romper el workflow.
+# curse-id: 000000
+# wago-id: aBcDeF
+
 # Skip the alternative "no library" variant — this addon ships no libs.
 enable-nolib-creation: no
 

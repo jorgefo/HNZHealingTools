@@ -1671,25 +1671,66 @@ local function MrtNoteRow(parent, note, idx, onEdit, onDelete, onTest, onView)
     row:SetHeight(36)
     SubPanelBackdrop(row, 0.6)
 
+    -- Toggle manual: el usuario decide si esta nota esta "activa" en runtime.
+    -- backwards-compat: note.enabled nil = true (notas viejas activas por default).
+    -- Click toggle no requiere abrir editor — pensado para alternar segun compo
+    -- del raid sin perder la nota.
+    local toggle = CreateFrame("CheckButton", nil, row, "UICheckButtonTemplate")
+    toggle:SetSize(20, 20); toggle:SetPoint("LEFT", 6, 0)
+    SkinCheck(toggle)
+    toggle:SetChecked(note.enabled ~= false)
+
     -- Encounter Journal lookup: portrait + raid name. Si el encuentro no esta
     -- en el journal (id=0 o id invalido), display==nil y mostramos fallback.
     local display = ns.GetEncounterDisplay and ns.GetEncounterDisplay(note.id)
     local icon = row:CreateTexture(nil, "ARTWORK")
-    icon:SetSize(30, 30); icon:SetPoint("LEFT", 6, 0)
-    if display and display.icon then
+    icon:SetSize(30, 30); icon:SetPoint("LEFT", toggle, "RIGHT", 6, 0)
+    local iconHasArt = display and display.icon
+    if iconHasArt then
         icon:SetTexture(display.icon)
     else
         icon:SetTexture("Interface\\Icons\\Achievement_Boss_Generic")
-        icon:SetVertexColor(0.5, 0.5, 0.5, 1)
     end
 
-    -- Texto: "Nombre |cff888888(ID N) — Raid|r"
+    -- Texto: "Nombre |cff888888(ID N) — Raid|r  [LFR/N/H/M]"
     local fs = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     fs:SetPoint("LEFT", icon, "RIGHT", 8, 0)
-    fs:SetWidth(330); fs:SetJustifyH("LEFT")
-    fs:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+    fs:SetWidth(310); fs:SetJustifyH("LEFT")
     local raidPart = (display and display.raid) and ("  |cff888888— " .. display.raid .. "|r") or ""
-    fs:SetText(("%s |cff888888(ID %d)|r%s"):format(note.name or "?", note.id or 0, raidPart))
+    -- Badge de dificultades: nil = legacy / sin filtro (no mostramos), todas marcadas
+    -- tampoco aporta info, asi que solo mostramos si el usuario filtro algo.
+    local diffPart = ""
+    local d = note.difficulties
+    if d and not (d.lfr and d.normal and d.heroic and d.mythic) then
+        local tags = {}
+        if d.lfr    then table.insert(tags, "R") end
+        if d.normal then table.insert(tags, "N") end
+        if d.heroic then table.insert(tags, "H") end
+        if d.mythic then table.insert(tags, "M") end
+        if #tags > 0 then
+            diffPart = "  |cffffc83d[" .. table.concat(tags, "/") .. "]|r"
+        end
+    end
+    fs:SetText(("%s |cff888888(ID %d)|r%s%s"):format(note.name or "?", note.id or 0, raidPart, diffPart))
+
+    -- Dim/normal visuals segun enabled. Aplicado tambien al inicio asi notas
+    -- importadas como disabled aparecen grises desde el principio.
+    local function UpdateEnabledVisuals()
+        local on = note.enabled ~= false
+        if on then
+            fs:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+            if iconHasArt then icon:SetVertexColor(1, 1, 1, 1)
+            else icon:SetVertexColor(0.5, 0.5, 0.5, 1) end
+        else
+            fs:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+            icon:SetVertexColor(0.35, 0.35, 0.35, 1)
+        end
+    end
+    UpdateEnabledVisuals()
+    toggle:SetScript("OnClick", function(self)
+        note.enabled = self:GetChecked() and true or false
+        UpdateEnabledVisuals()
+    end)
 
     local testBtn = Btn(row, ns.L["Test"], 56, 20); testBtn:SetPoint("RIGHT", -200, 0)
     testBtn:SetScript("OnClick", function() if onTest then onTest(idx) end end)
@@ -1723,7 +1764,7 @@ local function RefreshMrtNotes()
             function(idx) GetMrtNoteEditor():OpenEdit(idx, RefreshMrtNotes) end,
             function(idx) table.remove(notes, idx); RefreshMrtNotes() end,
             function(idx)
-                if ns.MrtTimelineTest then ns:MrtTimelineTest(notes[idx].id or 0) end
+                if ns.MrtTimelineTest then ns:MrtTimelineTest(idx) end
             end,
             function(idx) GetMrtNoteViewer():Open(notes[idx]) end)
         row:SetPoint("TOPLEFT", 3, -3 - (i-1)*rh)
@@ -2595,7 +2636,7 @@ local function GetProfileImportModal() if not profileImportModal then profileImp
 -- entrar manualmente el ID del jefe (Wowhead url o 0 para cualquier encuentro).
 -- ============================================================
 local function CreateMrtNoteEditor()
-    local f = CreateEditorFrame("HNZHealingToolsMrtNoteEditor", ns.L["MRT / NSRT note editor"], 600, 500)
+    local f = CreateEditorFrame("HNZHealingToolsMrtNoteEditor", ns.L["MRT / NSRT note editor"], 600, 540)
     local p = f.content
 
     local editingIdx  -- nil = add mode
@@ -2636,10 +2677,35 @@ local function CreateMrtNoteEditor()
     -- encuentros del Encounter Journal. Click llena ID + Name automaticamente.
     AttachEncounterAutocomplete(idBox, nameBox)
 
-    -- Row 3: paste box
+    -- Row 3: difficulty filter. Cada nota declara en cuales dificultades aplica;
+    -- en ENCOUNTER_START se filtra contra la dificultad actual. State local
+    -- (selectedDiffs) que se commitea a note.difficulties en Save.
+    local diffLabel = p:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    diffLabel:SetPoint("TOPLEFT", 4, -106); diffLabel:SetText(ns.L["Difficulties:"])
+    diffLabel:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+
+    local selectedDiffs = { lfr = true, normal = true, heroic = true, mythic = true }
+    local diffKeys = { "lfr", "normal", "heroic", "mythic" }
+    local diffLabels = { lfr = ns.L["LFR"], normal = ns.L["Normal"], heroic = ns.L["Heroic"], mythic = ns.L["Mythic"] }
+    local diffChecks = {}
+    local prevAnchor
+    for _, key in ipairs(diffKeys) do
+        local ck = CreateCheckbox(p, diffLabels[key],
+            function() return selectedDiffs[key] end,
+            function(v) selectedDiffs[key] = v and true or false end)
+        if prevAnchor then
+            ck:SetPoint("LEFT", prevAnchor, "RIGHT", 70, 0)
+        else
+            ck:SetPoint("LEFT", diffLabel, "RIGHT", 12, 0)
+        end
+        diffChecks[key] = ck
+        prevAnchor = ck
+    end
+
+    -- Row 4: paste box
     local pasteHint = p:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    pasteHint:SetPoint("TOPLEFT", 4, -106); pasteHint:SetText(ns.L["(paste below)"])
-    local boxFrame = MultilineBox(p, 560, 230); boxFrame:SetPoint("TOPLEFT", 4, -122)
+    pasteHint:SetPoint("TOPLEFT", 4, -136); pasteHint:SetText(ns.L["(paste below)"])
+    local boxFrame = MultilineBox(p, 560, 240); boxFrame:SetPoint("TOPLEFT", 4, -152)
     local box = boxFrame.editbox
 
     -- Auto-detect en NSRT cuando se pega texto y los inputs estan vacios
@@ -2672,6 +2738,10 @@ local function CreateMrtNoteEditor()
         if noteText == "" then
             fb:SetTextColor(1, 0.3, 0.3); fb:SetText(ns.L["Paste the note text first."]); return
         end
+        -- Validar dificultades: al menos una marcada (si no, la nota nunca dispara).
+        if not (selectedDiffs.lfr or selectedDiffs.normal or selectedDiffs.heroic or selectedDiffs.mythic) then
+            fb:SetTextColor(1, 0.3, 0.3); fb:SetText(ns.L["Select at least one difficulty."]); return
+        end
         local id = tonumber(idText)
         if not id then
             if fmtDD:GetValue() == "nsrt" then
@@ -2688,17 +2758,33 @@ local function CreateMrtNoteEditor()
             end
         end
 
+        local diffs = {
+            lfr = selectedDiffs.lfr and true or false,
+            normal = selectedDiffs.normal and true or false,
+            heroic = selectedDiffs.heroic and true or false,
+            mythic = selectedDiffs.mythic and true or false,
+        }
         local notes = ns.db.mrtTimeline.notes
         if editingIdx and notes[editingIdx] then
             notes[editingIdx].id = id
             notes[editingIdx].name = nameText
             notes[editingIdx].text = noteText
+            notes[editingIdx].difficulties = diffs
+            -- preserva enabled (toggle manual desde la row); no se toca aqui
         else
-            table.insert(notes, { id = id, name = nameText, text = noteText })
+            table.insert(notes, { id = id, name = nameText, text = noteText, difficulties = diffs, enabled = true })
         end
         f:Hide()
         if onDone then onDone() end
     end)
+
+    local function ApplyDiffs(d)
+        -- d nil = legacy nota sin filtro = todas las dificultades habilitadas.
+        for _, key in ipairs(diffKeys) do
+            selectedDiffs[key] = (d == nil) or (d[key] == true)
+        end
+        for _, ck in pairs(diffChecks) do ck:Refresh() end
+    end
 
     local modal = {}
     function modal:OpenAdd(cb)
@@ -2707,6 +2793,7 @@ local function CreateMrtNoteEditor()
         saveBtn:SetText(ns.L["Import"])
         fmtDD:SetValue("mrt"); UpdateHint("mrt")
         idBox:SetText(""); nameBox:SetText(""); box:SetText(""); fb:SetText("")
+        ApplyDiffs(nil)  -- new note default = all 4 difficulties
         f:Show(); box:SetFocus()
     end
     function modal:OpenEdit(idx, cb)
@@ -2721,6 +2808,7 @@ local function CreateMrtNoteEditor()
         nameBox:SetText(n.name or "")
         box:SetText(n.text or "")
         fb:SetText("")
+        ApplyDiffs(n.difficulties)
         f:Show()
     end
     return modal
@@ -3007,104 +3095,6 @@ local function BuildProfilesPage(p)
 end
 
 -- ============================================================
--- Credits page
---
--- Lista los addons que sirvieron de referencia + libs opcionales + el tooling
--- usado para construir el addon. Cada entry tiene nombre + descripcion + URL
--- en un EditBox read-only para que el usuario pueda copiar facil (en WoW las
--- URLs en FontStrings no son clickables, asi que el patron standard es:
--- click en el box -> highlight all -> Ctrl+C).
--- ============================================================
-local function BuildCreditsPage(p)
-    local C1 = 20
-    local y = -8
-    local hd = H(p, ns.L["Credits"]); hd:SetPoint("TOPLEFT", 8, y); y = y - 26
-
-    local intro = p:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    intro:SetPoint("TOPLEFT", C1, y); intro:SetWidth(720); intro:SetJustifyH("LEFT")
-    intro:SetWordWrap(true)
-    intro:SetText(ns.L["HNZ Healing Tools was inspired by and works alongside the following addons and tools. Thanks to their authors and communities."])
-    y = y - 26
-
-    local function AddEntry(title, description, url)
-        local nameLbl = p:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-        nameLbl:SetPoint("TOPLEFT", C1, y); nameLbl:SetText(title)
-        nameLbl:SetTextColor(C_ACCENT.r, C_ACCENT.g, C_ACCENT.b)
-        y = y - 16
-
-        if description then
-            local descLbl = p:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-            descLbl:SetPoint("TOPLEFT", C1, y); descLbl:SetWidth(720); descLbl:SetJustifyH("LEFT")
-            descLbl:SetWordWrap(true); descLbl:SetText(description)
-            y = y - 14
-        end
-
-        if url then
-            -- EditBox "read-only": permitimos edits transitorios pero los
-            -- revertimos en OnTextChanged, asi el contenido queda fijo pero
-            -- el usuario puede seleccionar y copiar (Ctrl+C).
-            local urlBox = MakeEditBox(p, 540, 18)
-            urlBox:SetPoint("TOPLEFT", C1, y)
-            urlBox:SetText(url)
-            urlBox:SetAutoFocus(false)
-            urlBox:SetFontObject("GameFontHighlightSmall")
-            urlBox:SetScript("OnEditFocusGained", function(self) self:HighlightText() end)
-            local locked = url
-            urlBox:SetScript("OnTextChanged", function(self, userInput)
-                if userInput and self:GetText() ~= locked then self:SetText(locked) end
-            end)
-            y = y - 22
-        end
-        y = y - 6  -- spacing entre entradas
-    end
-
-    -- Reference addons (primero — son la mayoria del contenido)
-    local sh1 = SubH(p, ns.L["Reference addons"]); sh1:SetPoint("TOPLEFT", C1, y); y = y - 18
-    AddEntry(
-        "CursorRing",
-        ns.L["Inspiration for the cursor ring's trail and sparkle effects."],
-        "https://www.curseforge.com/wow/addons/cursorring"
-    )
-    AddEntry(
-        "CDPulse",
-        ns.L["Inspiration for the central cooldown pulse module."],
-        "https://www.curseforge.com/wow/addons/cdpulse"
-    )
-    AddEntry(
-        "DandersFrames",
-        ns.L["Inspiration for the config window's UI theming and palette."],
-        "https://www.curseforge.com/wow/addons/dandersframes"
-    )
-    AddEntry(
-        "Method Raid Tools (MRT)",
-        ns.L["Source format for raid note timeline reminders."],
-        "https://www.curseforge.com/wow/addons/method-raid-tools"
-    )
-    AddEntry(
-        "NSRT (Northern Sky Raid Tools)",
-        ns.L["Alternative timeline format supported by the MRT / NSRT module."],
-        "https://www.curseforge.com/wow/addons/northern-sky-raid-tools"
-    )
-    AddEntry(
-        ns.L["Classic WeakAuras (no longer available)"],
-        ns.L["Various ideas and visual patterns are based on classic WeakAuras that are no longer maintained or available."],
-        nil   -- sin URL: ya no existen
-    )
-
-    -- Libraries
-    local sh2 = SubH(p, ns.L["Optional libraries"]); sh2:SetPoint("TOPLEFT", C1, y); y = y - 18
-    AddEntry(
-        "LibSharedMedia-3.0",
-        ns.L["Optional dependency: expands the available sound library for cooldown pulses and MRT trigger sounds."],
-        "https://www.curseforge.com/wow/addons/libsharedmedia-3-0"
-    )
-
-    -- Built with — al final, sin descripcion, solo nombre + URL.
-    local sh3 = SubH(p, ns.L["Built with"]); sh3:SetPoint("TOPLEFT", C1, y); y = y - 18
-    AddEntry("Claude Code", nil, "https://claude.com/claude-code")
-end
-
--- ============================================================
 -- Main Window
 -- ============================================================
 
@@ -3194,7 +3184,6 @@ function ns:CreateConfigWindow()
         }},
         {name=ns.L["General"],       builder=BuildGeneralPage},
         {name=ns.L["Profiles"],      builder=BuildProfilesPage},
-        {name=ns.L["Credits"],       builder=BuildCreditsPage},
     }
 
     -- Helper: build a ScrollFrame inside `parentArea` containing the page produced

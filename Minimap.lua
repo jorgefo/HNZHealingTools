@@ -1,7 +1,7 @@
 local addonName, ns = ...
 
 local BUTTON_NAME   = "HNZHealingToolsMinimapButton"
-local ICON_TEXTURE  = "Interface\\Icons\\Spell_Arcane_Rune"
+local ICON_TEXTURE  = "Interface\\Icons\\Spell_Nature_HealingTouch"
 local DEFAULT_ANGLE = 210
 local RADIUS        = 80
 

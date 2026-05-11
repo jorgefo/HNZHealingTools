@@ -33,6 +33,29 @@ local encounterStart     -- GetTime() del pull (o nil)
 local inEncounter = false
 local isTestEncounter = false  -- true cuando StartEncounter vino de MrtTimelineTest
 
+-- Mapa de difficultyID -> bucket logico. Permite que una nota declare en cuales
+-- dificultades aplica via note.difficulties = {lfr=, normal=, heroic=, mythic=}.
+-- Cubrimos raid (10/25/30/40) y 5-man; difficultyIDs fuera del mapa devuelven
+-- nil y se tratan como "no filtrar" (match-anything) para no sorprender al
+-- usuario en modos exoticos (timewalking variantes, escenarios, etc.).
+local DIFFICULTY_BUCKET = {
+    -- Raid
+    [14] = "normal", [15] = "heroic", [16] = "mythic", [17] = "lfr", [7] = "lfr",
+    -- 5-man / dungeons
+    [1] = "normal", [2] = "heroic", [23] = "mythic", [8] = "mythic",
+}
+function ns.GetMrtDifficultyBucket(diffID) return DIFFICULTY_BUCKET[diffID] end
+
+-- Backwards-compat: notas sin difficulties (creadas antes del filtro) hacen
+-- match con cualquier dificultad. Si bucket es nil (dificultad desconocida o
+-- modo test sin contexto), tampoco filtramos.
+local function NoteMatchesDifficulty(note, bucket)
+    if not bucket then return true end
+    local d = note.difficulties
+    if not d then return true end
+    return d[bucket] == true
+end
+
 local function GetCfg() return ns.db and ns.db.mrtTimeline end
 
 local function GetSpellTexture(spellID)
@@ -207,20 +230,51 @@ function ns.SearchEncounters(query, limit)
     return out
 end
 
+-- Blizzard_EncounterJournal es load-on-demand. EJ_GetEncounterInfo puede devolver
+-- nil/data incompleta para algunos encuentros hasta que el journal se inicializa
+-- al menos una vez en la sesion — sin esto el match de activo falla porque
+-- display.raid/mapID quedan nil y nunca matchean con GetInstanceInfo().
+local ejLoaded = false
+local function EnsureEJLoaded()
+    if ejLoaded then return true end
+    local isLoaded, loader
+    if _G.C_AddOns and _G.C_AddOns.IsAddOnLoaded then
+        isLoaded = C_AddOns.IsAddOnLoaded("Blizzard_EncounterJournal")
+        loader = C_AddOns.LoadAddOn
+    else
+        isLoaded = _G.IsAddOnLoaded and IsAddOnLoaded("Blizzard_EncounterJournal")
+        loader = _G.LoadAddOn
+    end
+    if not isLoaded and loader then
+        local ok = pcall(loader, "Blizzard_EncounterJournal")
+        isLoaded = ok and true or false
+    end
+    ejLoaded = isLoaded and true or false
+    return ejLoaded
+end
+ns.EnsureEJLoaded = EnsureEJLoaded
+
 -- Obtiene info del Encounter Journal para enriquecer la UI: nombre del jefe,
--- nombre de la raid/dungeon y portrait icon. Cualquier API que falle se
--- maneja via pcall; en peor caso devuelve nil y la UI muestra solo el ID.
+-- nombre de la raid/dungeon, portrait icon, y mapID. Cualquier API que falle
+-- se maneja via pcall; en peor caso devuelve nil y la UI muestra solo el ID.
+-- mapID es key para hacer match con GetInstanceInfo() de forma confiable
+-- (numerico, no localizado).
 function ns.GetEncounterDisplay(encounterID)
     if not encounterID or encounterID == 0 then return nil end
+    EnsureEJLoaded()
     if not _G.EJ_GetEncounterInfo then return nil end
     local ok, name, _, _, _, _, instanceID = pcall(_G.EJ_GetEncounterInfo, encounterID)
     if not ok or not name then return nil end
     local out = { name = name }
     if instanceID and _G.EJ_GetInstanceInfo then
-        local ok2, iname, _, _, buttonImage1 = pcall(_G.EJ_GetInstanceInfo, instanceID)
-        if ok2 and iname then
-            out.raid = iname
-            out.raidIcon = buttonImage1
+        -- EJ_GetInstanceInfo returns: name, description, bgImage, buttonImage1,
+        -- loreImage, buttonImage2, dungeonAreaMapID, link, shouldDisplayDifficulty,
+        -- mapID. Con pcall ok shift por 1.
+        local r = { pcall(_G.EJ_GetInstanceInfo, instanceID) }
+        if r[1] and r[2] then
+            out.raid = r[2]
+            out.raidIcon = r[5]
+            if type(r[11]) == "number" then out.mapID = r[11] end
         end
     end
     if _G.EJ_GetCreatureInfo then
@@ -234,16 +288,30 @@ end
 -- Note lookup por encuentro
 -- ============================================================
 
-local function FindNoteForEncounter(encounterID)
+-- Filtro de match: una nota aplica al encounter actual si pasa los 3 filtros:
+-- (1) enabled (toggle manual; backwards-compat nil=true), (2) id match (exacto
+-- o fallback id=0), (3) dificultad. El toggle manual da control rapido al
+-- usuario para alternar notas en runtime sin tener que borrar/re-importar
+-- (caso de uso: compo del raid cambia y otra nota pasa a aplicar).
+local function NoteEnabled(note) return note.enabled ~= false end
+
+local function FindNoteForEncounter(encounterID, difficultyID)
     local cfg = GetCfg()
     if not cfg or not cfg.notes then return nil end
-    -- Match exacto primero
+    local bucket = difficultyID and DIFFICULTY_BUCKET[difficultyID] or nil
+    -- Match exacto primero (id + dificultad + enabled)
     for _, n in ipairs(cfg.notes) do
-        if n.id == encounterID and n.text and n.text ~= "" then return n end
+        if NoteEnabled(n) and n.id == encounterID and n.text and n.text ~= ""
+           and NoteMatchesDifficulty(n, bucket) then
+            return n
+        end
     end
-    -- Fallback a id=0 (cualquier encuentro)
+    -- Fallback a id=0 (cualquier encuentro) + dificultad + enabled
     for _, n in ipairs(cfg.notes) do
-        if n.id == 0 and n.text and n.text ~= "" then return n end
+        if NoteEnabled(n) and n.id == 0 and n.text and n.text ~= ""
+           and NoteMatchesDifficulty(n, bucket) then
+            return n
+        end
     end
     return nil
 end
@@ -495,8 +563,8 @@ end
 -- Encounter lifecycle
 -- ============================================================
 
-local function LoadEntriesForEncounter(encounterID)
-    local note = FindNoteForEncounter(encounterID)
+local function LoadEntriesForEncounter(encounterID, difficultyID)
+    local note = FindNoteForEncounter(encounterID, difficultyID)
     if note then
         entries = ParseNote(note.text)
     else
@@ -508,12 +576,12 @@ local function LoadEntriesForEncounter(encounterID)
 end
 ns.MrtLoadEntriesForEncounter = LoadEntriesForEncounter
 
-local function StartEncounter(encounterID, fromTest)
+local function StartEncounter(encounterID, fromTest, difficultyID)
     activeEncounterID = encounterID
     encounterStart = GetTime()
     inEncounter = true
     isTestEncounter = fromTest and true or false
-    LoadEntriesForEncounter(encounterID)
+    LoadEntriesForEncounter(encounterID, difficultyID)
 end
 
 local function EndEncounter()
@@ -551,8 +619,8 @@ function ns:InitMrtTimeline()
     ev:RegisterUnitEvent("UNIT_SPELLCAST_SUCCEEDED", "player")
     ev:SetScript("OnEvent", function(_, event, ...)
         if event == "ENCOUNTER_START" then
-            local encounterID = ...
-            StartEncounter(encounterID, false)
+            local encounterID, _, difficultyID = ...
+            StartEncounter(encounterID, false, difficultyID)
         elseif event == "ENCOUNTER_END" then
             EndEncounter()
         elseif event == "UNIT_SPELLCAST_SUCCEEDED" then
@@ -575,13 +643,22 @@ function ns:InitMrtTimeline()
     end)
 end
 
--- Test mode: simula un pull con el encounterID dado, asi el usuario puede ver
--- como se renderiza una nota especifica sin estar en el encuentro real. Si no
--- pasan encounterID, usa 0 (busca la nota id=0). Auto-detiene a los 90s pero
--- solo si seguimos en modo test — si un ENCOUNTER_START real ocurrio mientras,
--- isTestEncounter ya es false y no tocamos el encuentro real.
-function ns:MrtTimelineTest(encounterID)
-    StartEncounter(encounterID or 0, true)
+-- Test mode: simula un pull con la nota en `noteIndex` (asi siempre testeamos
+-- la nota exacta que el usuario clickeo, incluso si hay multiples notas para el
+-- mismo encounterID en distintas dificultades). Bypassa el filtro de dificultad
+-- usando directamente note.text. Auto-detiene a los 90s pero solo si seguimos
+-- en modo test — si un ENCOUNTER_START real ocurrio mientras, isTestEncounter
+-- ya es false y no tocamos el encuentro real.
+function ns:MrtTimelineTest(noteIndex)
+    local cfg = GetCfg()
+    local note = cfg and cfg.notes and cfg.notes[noteIndex]
+    if not note then return end
+    activeEncounterID = note.id or 0
+    encounterStart = GetTime()
+    inEncounter = true
+    isTestEncounter = true
+    entries = ParseNote(note.text or "")
+    for _, e in ipairs(entries) do e.consumed = nil end
     C_Timer.After(90, function()
         if inEncounter and isTestEncounter then EndEncounter() end
     end)

@@ -26,7 +26,9 @@ jobs:
           # GitHub release: provided automatically, no setup needed.
           GITHUB_OAUTH: ${{ secrets.GITHUB_TOKEN }}
 
-          # Optional: add these as Settings -> Secrets to enable platform uploads.
-          # CF_API_KEY:     ${{ secrets.CF_API_KEY }}
-          # WAGO_API_TOKEN: ${{ secrets.WAGO_API_TOKEN }}
+          # Plataformas: si el secret esta vacio, el packager simplemente skipea
+          # ese destino — no rompe el workflow. Agregar los secrets desde
+          # Settings -> Secrets and variables -> Actions.
+          CF_API_KEY:     ${{ secrets.CF_API_KEY }}
+          WAGO_API_TOKEN: ${{ secrets.WAGO_API_TOKEN }}
           # WOWI_API_TOKEN: ${{ secrets.WOWI_API_TOKEN }}

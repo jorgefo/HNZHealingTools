@@ -6,10 +6,26 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ---
 
+## [1.2.0] — 2026-05-11
+
+### Added
+- **Filtro de dificultad por nota MRT/NSRT** — cada nota declara en cuáles dificultades aplica via 4 checkboxes (LFR / Normal / Heroico / Mítico) en el editor. En `ENCOUNTER_START` el matcher filtra por la dificultad actual del raid/dungeon además del encounterID, así podés tener varias notas para el mismo jefe (una por dificultad) y solo dispara la que corresponde. Notas viejas sin filtro aplican a cualquier dificultad (backwards-compat). Badge `[R/N/H/M]` en cada row del listado cuando hay filtro activo.
+- **Toggle manual de activación por nota** — checkbox a la izquierda de cada row en MRT/NSRT → Encounters. Permite activar/desactivar una nota sin abrir el editor ni borrarla — pensado para alternar entre notas según compo del raid. Row deshabilitada se muestra dim. `FindNoteForEncounter` salta notas con `enabled=false`.
+- **Soporte de múltiples notas para el mismo encuentro** — antes solo se usaba la primera match por ID; ahora con difficulty filter + enabled toggle podés tener varias variantes del mismo boss y el runtime elige la correcta. El botón "Test" ahora usa el índice exacto de la fila (no el encounterID) para previsualizar la nota específica que clickeaste.
+
+### Changed
+- **Carga lazy del `Blizzard_EncounterJournal`** desde `GetEncounterDisplay` la primera vez que se necesita info de un encuentro — sin esto el journal podía devolver datos parciales para algunos jefes hasta que el usuario lo abría manualmente, lo que causaba portraits/raid names faltantes en el listado.
+- **`MrtTimelineTest(noteIndex)`** — refactor: ahora recibe el índice de la nota en lugar del encounterID. Necesario para distinguir entre varias notas con el mismo ID en distintas dificultades.
+
+### Removed
+- **Página de Créditos** — eliminada del sidebar de configuración. Removida la función `BuildCreditsPage`, su entry en `pageDefs`, y las 13 traducciones esES exclusivas de esa página.
+
+---
+
 ## [1.1.0] — 2026-05-10
 
 ### Added
-- **Credits page** in the config window (last tab in the sidebar). Lists the reference addons (CursorRing, CDPulse, MRT, NSRT — Northern Sky Raid Tools, Classic WeakAuras), optional library (LibSharedMedia-3.0), and the tooling used to build the addon (Claude Code). Each entry shows a copyable URL.
+- **Credits page** in the config window (last tab in the sidebar). Lists the reference addons (CursorRing, CDPulse, MRT, NSRT — Northern Sky Raid Tools, Classic WeakAuras) and optional library (LibSharedMedia-3.0). Each entry shows a copyable URL.
 - **MRT / NSRT Timeline Reminders** — nuevo módulo que parsea notas de Method Raid Tools y Northern Sky Raid Tools, filtradas a tu nombre, y muestra recordatorios cerca del cursor / en un anillo / como pulse cuando se acerca el momento de castear cada hechizo. Características:
   - Parser dual MRT (`{time:M:SS.t} - Nombre {spell:N}`) + NSRT (`time:N;tag:Nombre;spellid:N`)
   - Lista de notas por encuentro: cada nota asociada a un `EncounterID` específico (o 0 = cualquiera). Auto-detección del ID/Nombre del header NSRT al importar.
