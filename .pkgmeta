@@ -15,8 +15,8 @@ package-as: HNZHealingTools
 #   Wago:       Project Settings -> Wago ID (string alfanumerico)
 # Descomenta y completa cuando los tengas — mientras esten comentados, esa
 # plataforma se skipea silenciosamente sin romper el workflow.
-# curse-id: 000000
-# wago-id: aBcDeF
+curse-id: 1540778
+wago-id: qGZOkoNd
 
 # Skip the alternative "no library" variant — this addon ships no libs.
 enable-nolib-creation: no
