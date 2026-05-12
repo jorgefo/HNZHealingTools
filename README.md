@@ -2,7 +2,7 @@
 
 A lightweight World of Warcraft (Retail) addon for healers and cooldown-heavy specs. Surfaces your spells, auras, and raid-note reminders through complementary displays — cursor icons, character rings, a central cooldown pulse, and an MRT/NSRT timeline reminder — so you can keep your eyes on the action instead of glancing at action bars or the chat frame.
 
-![Interface](https://img.shields.io/badge/Interface-12.0.1-blue) ![License](https://img.shields.io/badge/License-MIT-green) ![Version](https://img.shields.io/badge/Version-1.2.0-orange)
+![Interface](https://img.shields.io/badge/Interface-12.0.5-blue) ![License](https://img.shields.io/badge/License-MIT-green) ![Version](https://img.shields.io/badge/Version-1.2.2-orange)
 
 ---
 
@@ -121,7 +121,7 @@ The **Profiles** tab lets you create, copy, switch, delete, import, and export p
 
 ## Compatibility
 
-- **Game version**: World of Warcraft Retail, Interface `120001` (The War Within 12.0.x).
+- **Game version**: World of Warcraft Retail, Interface `120005` (The War Within 12.0.x).
 - **Classic / Wrath / Cata Classic**: not supported.
 - **Optional dependency**: [LibSharedMedia-3.0](https://www.curseforge.com/wow/addons/libsharedmedia-3-0) — when present, expands the available sound library for cooldown pulses and MRT trigger sounds.
 

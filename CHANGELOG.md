@@ -6,6 +6,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ---
 
+## [1.2.2] — 2026-05-11
+
+### Changed
+- **Interface version `120001` → `120005`**: bumpeada para matchear el cliente actual de Retail (parche 12.0.5). Sin este bump el addon aparece "Out of date" en el listado in-game y los usuarios necesitan tildar "Load out of date AddOns" para que cargue. Sin cambios funcionales.
+
+---
+
 ## [1.2.1] — 2026-05-11
 
 ### Fixed
