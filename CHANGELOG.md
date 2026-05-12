@@ -6,6 +6,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ---
 
+## [1.2.1] — 2026-05-11
+
+### Fixed
+- **Cliente de Wago no reconocía el addon instalado**: faltaban las líneas `## X-Curse-Project-ID:` y `## X-Wago-ID:` en el `.toc`. Sin ellas, el cliente de Wago crea la carpeta al instalar pero no la matchea con el proyecto en wago.io, así que el addon no aparece en el listado de instalados. Agregadas ambas referencias al `.toc`.
+
+---
+
 ## [1.2.0] — 2026-05-11
 
 ### Added
