@@ -31,3 +31,4 @@ ignore:
   - .pkgmeta
   - Build-Package.ps1
   - dist
+  - docs
