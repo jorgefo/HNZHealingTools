@@ -913,7 +913,59 @@ end})
 -- Row widgets
 -- ============================================================
 
-local function SpellRow(parent, entry, onRemove, onEdit)
+-- Helper: agrega botones de mover (↑/↓) a la izquierda de `anchorRight`. Retorna
+-- el upBtn (extremo izquierdo) para que el caller pueda anclar lo que sigue a su
+-- izquierda. `canUp`/`canDown` controlan si la accion esta disponible (primer
+-- elemento no puede subir, ultimo no puede bajar) — boton inhabilitado se ve dim.
+-- Usa una sola textura rotada 180° para la flecha de bajar; asi ambas tienen el
+-- mismo tamaño y aspecto por construccion (los glifos "^"/"v" del font se ven
+-- desbalanceados porque tienen alturas distintas en la mayoria de fonts).
+local function AddRowMoveButtons(row, anchorRight, onMoveUp, onMoveDown, canUp, canDown)
+    local function MakeArrow(direction, enabled, onClick, tooltip)
+        local b = CreateFrame("Button", nil, row); b:SetSize(16, 20)
+        local tex = b:CreateTexture(nil, "ARTWORK")
+        tex:SetSize(12, 12); tex:SetPoint("CENTER")
+        -- Textura propia del addon (Textures/arrow_up.tga): triangulo blanco
+        -- antialiased centrado en 64x64. Rotamos 180° para la flecha de bajar
+        -- asi ambas son identicas en tamaño/forma por construccion.
+        tex:SetTexture("Interface\\AddOns\\HNZHealingTools\\Textures\\arrow_up")
+        if direction == "down" then tex:SetRotation(math.pi) end
+        if enabled then
+            tex:SetVertexColor(C_TEXT.r, C_TEXT.g, C_TEXT.b, 1)
+            local h = b:CreateTexture(nil, "HIGHLIGHT"); h:SetAllPoints(); h:SetColorTexture(C_ACCENT.r, C_ACCENT.g, C_ACCENT.b, 0.2)
+            b:SetScript("OnEnter", function(s) GameTooltip:SetOwner(s, "ANCHOR_RIGHT"); GameTooltip:AddLine(tooltip); GameTooltip:Show() end)
+            b:SetScript("OnLeave", function() GameTooltip:Hide() end)
+            b:SetScript("OnClick", onClick)
+        else
+            tex:SetVertexColor(0.35, 0.35, 0.4, 0.6)
+            b:EnableMouse(false)
+        end
+        return b
+    end
+    local downBtn = MakeArrow("down", canDown, function() if onMoveDown then onMoveDown() end end, ns.L["Move down"])
+    downBtn:SetPoint("RIGHT", anchorRight, "LEFT", -2, 0)
+    local upBtn = MakeArrow("up", canUp, function() if onMoveUp then onMoveUp() end end, ns.L["Move up"])
+    upBtn:SetPoint("RIGHT", downBtn, "LEFT", -2, 0)
+    return upBtn
+end
+
+-- Boton Test (T) — fuerza el icono a aparecer junto al cursor real durante unos
+-- segundos para previsualizar como se va a ver. Anchor LEFT respecto a `anchorRight`.
+-- Usa font glyph "T" en GameFontNormal (font universal del cliente) con tint verde
+-- para que se distinga de los otros botones de la fila.
+local function AddRowTestButton(row, anchorRight, onTest)
+    local b = CreateFrame("Button", nil, row); b:SetSize(16, 20)
+    b:SetPoint("RIGHT", anchorRight, "LEFT", -2, 0)
+    local t = b:CreateFontString(nil, "OVERLAY", "GameFontNormal"); t:SetAllPoints(); t:SetText("T")
+    t:SetTextColor(0.4, 1.0, 0.5, 1)
+    local h = b:CreateTexture(nil, "HIGHLIGHT"); h:SetAllPoints(); h:SetColorTexture(0.3, 0.9, 0.3, 0.2)
+    b:SetScript("OnEnter", function(s) GameTooltip:SetOwner(s, "ANCHOR_RIGHT"); GameTooltip:AddLine(ns.L["Test"]); GameTooltip:Show() end)
+    b:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    b:SetScript("OnClick", function() if onTest then onTest() end end)
+    return b
+end
+
+local function SpellRow(parent, entry, index, listLen, onRemove, onEdit, onMoveUp, onMoveDown)
     local r=CreateFrame("Frame",nil,parent,"BackdropTemplate"); r:SetSize(parent:GetWidth()-6,34)
     r:SetBackdrop({bgFile="Interface\\Tooltips\\UI-Tooltip-Background",edgeFile="Interface\\Tooltips\\UI-Tooltip-Border",tile=true,tileSize=16,edgeSize=12,insets={left=2,right=2,top=2,bottom=2}})
     r:SetBackdropColor(0.1,0.1,0.15,0.7); r:SetBackdropBorderColor(0.4,0.4,0.5,0.6)
@@ -934,7 +986,7 @@ local function SpellRow(parent, entry, onRemove, onEdit)
     local dt=table.concat(badges," ")
     if dt~="" then dt=dt.." " end
     dt=dt.."|cff666666"..ns.L["ID:"]..entry.spellID.."|r"
-    local dtx=r:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall"); dtx:SetPoint("LEFT",nt,"RIGHT",6,0); dtx:SetPoint("RIGHT",-50,0); dtx:SetJustifyH("LEFT"); dtx:SetWordWrap(false); dtx:SetText(dt)
+    local dtx=r:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall"); dtx:SetPoint("LEFT",nt,"RIGHT",6,0); dtx:SetPoint("RIGHT",-86,0); dtx:SetJustifyH("LEFT"); dtx:SetWordWrap(false); dtx:SetText(dt)
     local rb=CreateFrame("Button",nil,r); rb:SetSize(20,20); rb:SetPoint("RIGHT",-5,0)
     local rt=rb:CreateFontString(nil,"OVERLAY","GameFontRed"); rt:SetAllPoints(); rt:SetText("X")
     local rh=rb:CreateTexture(nil,"HIGHLIGHT"); rh:SetAllPoints(); rh:SetColorTexture(0.8,0.2,0.2,0.3)
@@ -947,10 +999,11 @@ local function SpellRow(parent, entry, onRemove, onEdit)
     eb:SetScript("OnEnter",function(s) GameTooltip:SetOwner(s,"ANCHOR_RIGHT"); GameTooltip:AddLine(ns.L["Edit"]); GameTooltip:Show() end)
     eb:SetScript("OnLeave",function() GameTooltip:Hide() end)
     eb:SetScript("OnClick",function() if onEdit then onEdit(entry) end end)
+    AddRowMoveButtons(r, eb, onMoveUp, onMoveDown, index and index > 1, index and listLen and index < listLen)
     return r
 end
 
-local function CursorAuraRow(parent, entry, onRemove, onEdit)
+local function CursorAuraRow(parent, entry, index, listLen, onRemove, onEdit, onMoveUp, onMoveDown)
     local r=CreateFrame("Frame",nil,parent,"BackdropTemplate"); r:SetSize(parent:GetWidth()-6,34)
     r:SetBackdrop({bgFile="Interface\\Tooltips\\UI-Tooltip-Background",edgeFile="Interface\\Tooltips\\UI-Tooltip-Border",tile=true,tileSize=16,edgeSize=12,insets={left=2,right=2,top=2,bottom=2}})
     r:SetBackdropColor(0.1,0.1,0.15,0.7); r:SetBackdropBorderColor(0.4,0.4,0.5,0.6)
@@ -973,7 +1026,7 @@ local function CursorAuraRow(parent, entry, onRemove, onEdit)
     if entry.specs and #entry.specs>0 then dt=dt.." |cff88ccff"..ns.L["Specs:"]..#entry.specs.."|r" end
     if entry.requiredTalentSpellID then dt=dt.." |cffcc88ff"..ns.L["Talent"].."|r" end
     if notInCDM then dt=dt.." |cffaaaaaa"..ns.L["!CDM"].."|r" end
-    local dtx=r:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall"); dtx:SetPoint("LEFT",nt,"RIGHT",6,0); dtx:SetPoint("RIGHT",-50,0); dtx:SetJustifyH("LEFT"); dtx:SetWordWrap(false); dtx:SetText(dt)
+    local dtx=r:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall"); dtx:SetPoint("LEFT",nt,"RIGHT",6,0); dtx:SetPoint("RIGHT",-86,0); dtx:SetJustifyH("LEFT"); dtx:SetWordWrap(false); dtx:SetText(dt)
     local rb=CreateFrame("Button",nil,r); rb:SetSize(20,20); rb:SetPoint("RIGHT",-5,0)
     local rt=rb:CreateFontString(nil,"OVERLAY","GameFontRed"); rt:SetAllPoints(); rt:SetText("X")
     local rh=rb:CreateTexture(nil,"HIGHLIGHT"); rh:SetAllPoints(); rh:SetColorTexture(0.8,0.2,0.2,0.3)
@@ -986,10 +1039,11 @@ local function CursorAuraRow(parent, entry, onRemove, onEdit)
     eb:SetScript("OnEnter",function(s) GameTooltip:SetOwner(s,"ANCHOR_RIGHT"); GameTooltip:AddLine(ns.L["Edit"]); GameTooltip:Show() end)
     eb:SetScript("OnLeave",function() GameTooltip:Hide() end)
     eb:SetScript("OnClick",function() if onEdit then onEdit(entry) end end)
+    AddRowMoveButtons(r, eb, onMoveUp, onMoveDown, index and index > 1, index and listLen and index < listLen)
     return r
 end
 
-local function RingAuraRow(parent, entry, index, onRemove, onEdit)
+local function RingAuraRow(parent, entry, index, onRemove, onEdit, onTest)
     local r=CreateFrame("Frame",nil,parent,"BackdropTemplate"); r:SetSize(parent:GetWidth()-6,40)
     r:SetBackdrop({bgFile="Interface\\Tooltips\\UI-Tooltip-Background",edgeFile="Interface\\Tooltips\\UI-Tooltip-Border",tile=true,tileSize=16,edgeSize=12,insets={left=2,right=2,top=2,bottom=2}})
     r:SetBackdropColor(0.1,0.1,0.15,0.7); r:SetBackdropBorderColor(0.4,0.4,0.5,0.6)
@@ -1012,7 +1066,7 @@ local function RingAuraRow(parent, entry, index, onRemove, onEdit)
     if entry.requiredTalentSpellID then ds=ds.." |cffcc88ff"..ns.L["Talent"].."|r" end
     if notInCDM then ds=ds.." |cffaaaaaa"..ns.L["!CDM"].."|r" end
     ds=ds.." |cff666666"..ns.L["ID:"]..entry.spellID.."|r"
-    local dtx=r:CreateFontString(nil,"OVERLAY","GameFontNormal"); dtx:SetPoint("LEFT",nt,"RIGHT",6,0); dtx:SetPoint("RIGHT",-54,0); dtx:SetJustifyH("LEFT"); dtx:SetWordWrap(false); dtx:SetText(ds)
+    local dtx=r:CreateFontString(nil,"OVERLAY","GameFontNormal"); dtx:SetPoint("LEFT",nt,"RIGHT",6,0); dtx:SetPoint("RIGHT",-78,0); dtx:SetJustifyH("LEFT"); dtx:SetWordWrap(false); dtx:SetText(ds)
     local rb=CreateFrame("Button",nil,r); rb:SetSize(22,22); rb:SetPoint("RIGHT",-6,0)
     local rt=rb:CreateFontString(nil,"OVERLAY","GameFontRed"); rt:SetAllPoints(); rt:SetText("X")
     local rhl=rb:CreateTexture(nil,"HIGHLIGHT"); rhl:SetAllPoints(); rhl:SetColorTexture(0.8,0.2,0.2,0.3)
@@ -1025,6 +1079,7 @@ local function RingAuraRow(parent, entry, index, onRemove, onEdit)
     eb:SetScript("OnEnter",function(s) GameTooltip:SetOwner(s,"ANCHOR_RIGHT"); GameTooltip:AddLine(ns.L["Edit"]); GameTooltip:Show() end)
     eb:SetScript("OnLeave",function() GameTooltip:Hide() end)
     eb:SetScript("OnClick",function() if onEdit then onEdit(entry) end end)
+    if onTest then AddRowTestButton(r, eb, onTest) end
     return r
 end
 
@@ -1609,37 +1664,54 @@ local function ClearListContainer(c)
     for _,region in pairs({c:GetRegions()}) do region:Hide() end
 end
 
+-- Intercambia dos entries de una lista del db. Marca dirty para que la siguiente
+-- pasada de UpdateData del cursor display tome el nuevo orden y re-layoutee los
+-- iconos en la grid.
+local function SwapListEntries(list, i, j)
+    if not list[i] or not list[j] or i == j then return end
+    list[i], list[j] = list[j], list[i]
+    ns:MarkSpellDirty(); ns:MarkAuraDirty()
+end
+
 local function RefreshSpellList()
     if not spellListC then return end
     ClearListContainer(spellListC)
-    if #ns.db.cursorSpells==0 then
+    local list = ns.db.cursorSpells
+    if #list==0 then
         local e=spellListC:CreateFontString(nil,"OVERLAY","GameFontDisable"); e:SetPoint("TOPLEFT",5,-8); e:SetText(ns.L["No spells. Use 'Add Cursor Spell...' below."])
         spellListC:SetHeight(30)
     else
-        for i,entry in ipairs(ns.db.cursorSpells) do
-            local row=SpellRow(spellListC,entry,
-                function(id) ns.RemoveSpellEntry(ns.db.cursorSpells,id); RefreshSpellList() end,
-                function(e) GetCursorSpellEditor():OpenEdit(e) end)
+        local n = #list
+        for i,entry in ipairs(list) do
+            local row=SpellRow(spellListC,entry,i,n,
+                function(id) ns.RemoveSpellEntry(list,id); RefreshSpellList() end,
+                function(e) GetCursorSpellEditor():OpenEdit(e) end,
+                function() SwapListEntries(list, i, i-1); RefreshSpellList() end,
+                function() SwapListEntries(list, i, i+1); RefreshSpellList() end)
             row:SetPoint("TOPLEFT",3,-3-(i-1)*38)
         end
-        spellListC:SetHeight(#ns.db.cursorSpells*38+6)
+        spellListC:SetHeight(n*38+6)
     end
 end
 
 local function RefreshCursorAuraList()
     if not cursorAuraListC then return end
     ClearListContainer(cursorAuraListC)
-    if #ns.db.cursorAuras==0 then
+    local list = ns.db.cursorAuras
+    if #list==0 then
         local e=cursorAuraListC:CreateFontString(nil,"OVERLAY","GameFontDisable"); e:SetPoint("TOPLEFT",5,-8); e:SetText(ns.L["No auras. Use 'Add Cursor Aura...' below."])
         cursorAuraListC:SetHeight(30)
     else
-        for i,entry in ipairs(ns.db.cursorAuras) do
-            local row=CursorAuraRow(cursorAuraListC,entry,
-                function(id) ns.RemoveSpellEntry(ns.db.cursorAuras,id); RefreshCursorAuraList() end,
-                function(e) GetCursorAuraEditor():OpenEdit(e) end)
+        local n = #list
+        for i,entry in ipairs(list) do
+            local row=CursorAuraRow(cursorAuraListC,entry,i,n,
+                function(id) ns.RemoveSpellEntry(list,id); RefreshCursorAuraList() end,
+                function(e) GetCursorAuraEditor():OpenEdit(e) end,
+                function() SwapListEntries(list, i, i-1); RefreshCursorAuraList() end,
+                function() SwapListEntries(list, i, i+1); RefreshCursorAuraList() end)
             row:SetPoint("TOPLEFT",3,-3-(i-1)*38)
         end
-        cursorAuraListC:SetHeight(#ns.db.cursorAuras*38+6)
+        cursorAuraListC:SetHeight(n*38+6)
     end
 end
 
@@ -1654,7 +1726,8 @@ local function RefreshRingAuraList()
         for i,entry in ipairs(ns.db.ringAuras) do
             local row=RingAuraRow(ringAuraListC,entry,i,
                 function(id) ns.RemoveSpellEntry(ns.db.ringAuras,id); ns:RebuildRingDisplay(); RefreshRingAuraList() end,
-                function(e) GetRingAuraEditor():OpenEdit(e) end)
+                function(e) GetRingAuraEditor():OpenEdit(e) end,
+                function() if ns.TestRingEntry then ns:TestRingEntry(entry, 5) end end)
             row:SetPoint("TOPLEFT",3,-3-(i-1)*rh)
         end
         ringAuraListC:SetHeight(#ns.db.ringAuras*rh+6)
@@ -1897,6 +1970,18 @@ local function BuildCursorSettingsPage(p)
     }
     for _,d in ipairs(defs2) do local s=CreateSlider(p,d[1],d[2],d[3],d[4],d[5],d[6]); s:SetPoint("TOPLEFT",C2,c2y); table.insert(allSliders,s); c2y=c2y-48 end
 
+    -- Live preview: cursor virtual con grid de iconos sample (3 spells + 2 auras).
+    local previewY = math.min(c1y, c2y) - 12
+    local ph2 = SubH(p, ns.L["Live preview"]); ph2:SetPoint("TOPLEFT", C1, previewY); previewY = previewY - 20
+
+    local previewBox = CreateFrame("Frame", nil, p, "BackdropTemplate")
+    previewBox:SetPoint("TOPLEFT", C1, previewY)
+    previewBox:SetPoint("TOPRIGHT", p, "TOPRIGHT", -16, previewY)
+    previewBox:SetHeight(240)
+    SubPanelBackdrop(previewBox, 0.25)
+
+    local preview = ns:CreateCursorDisplayPreview(previewBox)
+    preview.container:SetAllPoints(previewBox)
 end
 
 -- Page 5: Ring Settings
@@ -1944,6 +2029,20 @@ local function BuildRingSettingsPage(p)
     }
     for _,d in ipairs(defs2) do local s=CreateSlider(p,d[1],d[2],d[3],d[4],d[5],d[6]); s:SetPoint("TOPLEFT",C2,c2y); table.insert(allSliders,s); c2y=c2y-48 end
 
+    -- Live preview: 3 anillos de muestra renderizados con el ringDisplay actual.
+    -- Reacciona automaticamente a cualquier slider via ns._notifyRingPreviews()
+    -- disparado desde Rebuild/RefreshRingDisplay.
+    local previewY = math.min(c1y, c2y) - 12
+    local ph2 = SubH(p, ns.L["Live preview"]); ph2:SetPoint("TOPLEFT", C1, previewY); previewY = previewY - 20
+
+    local previewBox = CreateFrame("Frame", nil, p, "BackdropTemplate")
+    previewBox:SetPoint("TOPLEFT", C1, previewY)
+    previewBox:SetPoint("TOPRIGHT", p, "TOPRIGHT", -16, previewY)
+    previewBox:SetHeight(240)
+    SubPanelBackdrop(previewBox, 0.25)
+
+    local preview = ns:CreateRingPreview(previewBox)
+    preview.container:SetAllPoints(previewBox)
 end
 
 -- ============================================================
@@ -1954,7 +2053,7 @@ local pulseSpellListC, pulseAuraListC
 -- Filas Pulse simplificadas (toda la edición vive en el modal). Solo pintamos:
 -- icon + name + ID + badges + Edit + Remove. Botones idénticos al patrón de las
 -- filas Cursor/Ring: × roja para remove, engranaje teal para edit.
-local function AddRowEditRemoveButtons(row, entry, onRemove, onEdit)
+local function AddRowEditRemoveButtons(row, entry, onRemove, onEdit, onTest)
     local rb = CreateFrame("Button", nil, row); rb:SetSize(20, 20); rb:SetPoint("RIGHT", -5, 0)
     local rt = rb:CreateFontString(nil, "OVERLAY", "GameFontRed"); rt:SetAllPoints(); rt:SetText("X")
     local rh = rb:CreateTexture(nil, "HIGHLIGHT"); rh:SetAllPoints(); rh:SetColorTexture(0.8, 0.2, 0.2, 0.3)
@@ -1971,10 +2070,12 @@ local function AddRowEditRemoveButtons(row, entry, onRemove, onEdit)
     eb:SetScript("OnLeave", function() GameTooltip:Hide() end)
     eb:SetScript("OnClick", function() if onEdit then onEdit(entry) end end)
 
-    return eb, rb
+    local tb
+    if onTest then tb = AddRowTestButton(row, eb, onTest) end
+    return eb, rb, tb
 end
 
-local function PulseSpellRow(parent, entry, onRemove, onEdit)
+local function PulseSpellRow(parent, entry, onRemove, onEdit, onTest)
     local row = CreateFrame("Frame", nil, parent, "BackdropTemplate")
     row:SetHeight(32)
     row:SetPoint("RIGHT", parent, "RIGHT", -8, 0)
@@ -1994,12 +2095,12 @@ local function PulseSpellRow(parent, entry, onRemove, onEdit)
     nm:SetText(name .. sndTag .. " |cff888888(" .. entry.spellID .. ")|r")
     nm:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
 
-    local editBtn = AddRowEditRemoveButtons(row, entry, onRemove, onEdit)
-    nm:SetPoint("RIGHT", editBtn, "LEFT", -8, 0)
+    local editBtn, _, testBtn = AddRowEditRemoveButtons(row, entry, onRemove, onEdit, onTest)
+    nm:SetPoint("RIGHT", testBtn or editBtn, "LEFT", -8, 0)
     return row
 end
 
-local function PulseAuraRow(parent, entry, onRemove, onEdit)
+local function PulseAuraRow(parent, entry, onRemove, onEdit, onTest)
     local row = CreateFrame("Frame", nil, parent, "BackdropTemplate")
     row:SetHeight(32)
     row:SetPoint("RIGHT", parent, "RIGHT", -8, 0)
@@ -2017,8 +2118,8 @@ local function PulseAuraRow(parent, entry, onRemove, onEdit)
     nm:SetText(name .. " " .. unitTag .. filterTag .. sndTag .. " |cff888888(" .. entry.spellID .. ")|r")
     nm:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
 
-    local editBtn = AddRowEditRemoveButtons(row, entry, onRemove, onEdit)
-    nm:SetPoint("RIGHT", editBtn, "LEFT", -8, 0)
+    local editBtn, _, testBtn = AddRowEditRemoveButtons(row, entry, onRemove, onEdit, onTest)
+    nm:SetPoint("RIGHT", testBtn or editBtn, "LEFT", -8, 0)
     return row
 end
 
@@ -2035,7 +2136,8 @@ local function RefreshPulseSpellList()
         for i, entry in ipairs(list) do
             local row = PulseSpellRow(pulseSpellListC, entry,
                 function(id) ns.RemoveSpellEntry(list, id); RefreshPulseSpellList() end,
-                function(e) GetPulseSpellEditor():OpenEdit(e) end)
+                function(e) GetPulseSpellEditor():OpenEdit(e) end,
+                function() if ns.TestPulseEntry then ns:TestPulseEntry(entry) end end)
             row:SetPoint("TOPLEFT", 3, -3 - (i - 1) * 36)
         end
         pulseSpellListC:SetHeight(#list * 36 + 6)
@@ -2055,7 +2157,8 @@ local function RefreshPulseAuraList()
         for i, entry in ipairs(list) do
             local row = PulseAuraRow(pulseAuraListC, entry,
                 function(id) ns.RemoveSpellEntry(list, id); RefreshPulseAuraList() end,
-                function(e) GetPulseAuraEditor():OpenEdit(e) end)
+                function(e) GetPulseAuraEditor():OpenEdit(e) end,
+                function() if ns.TestPulseEntry then ns:TestPulseEntry(entry) end end)
             row:SetPoint("TOPLEFT", 3, -3 - (i - 1) * 36)
         end
         pulseAuraListC:SetHeight(#list * 36 + 6)
@@ -2151,6 +2254,20 @@ local function BuildCooldownPulsePage(p)
 
     local testBtn=Btn(p,ns.L["Test pulse"],130,24); testBtn:SetPoint("LEFT",anchorBtn,"RIGHT",10,0)
     testBtn:SetScript("OnClick",function() ns:TestCooldownPulse() end)
+
+    -- Live preview: pulse de muestra que se repite usando iconSize/holdDuration/
+    -- opacity actuales. Reacciona a sliders via ns._notifyCooldownPulsePreviews.
+    local previewY = btnY - 36
+    local ph2 = SubH(p, ns.L["Live preview"]); ph2:SetPoint("TOPLEFT", C1, previewY); previewY = previewY - 20
+
+    local previewBox = CreateFrame("Frame", nil, p, "BackdropTemplate")
+    previewBox:SetPoint("TOPLEFT", C1, previewY)
+    previewBox:SetPoint("TOPRIGHT", p, "TOPRIGHT", -16, previewY)
+    previewBox:SetHeight(240)
+    SubPanelBackdrop(previewBox, 0.25)
+
+    local preview = ns:CreateCooldownPulsePreview(previewBox)
+    preview.container:SetAllPoints(previewBox)
 end
 
 -- Page 7: Cursor Ring (anillo decorativo siguiendo al raton)
@@ -2208,6 +2325,20 @@ local function BuildCursorRingMainPage(p)
         function() return ns.db.cursorRing.useClassColor end,
         function(v) ns.db.cursorRing.useClassColor=v; ns:RefreshCursorRing() end)
     cc:SetPoint("TOPLEFT",C1,by); table.insert(allCheckboxes,cc)
+
+    -- Live preview: cursor virtual moviendose con ring + cast + dot + FX. En
+    -- esta sub-tab el ring se ve full opacity y cast/dot al 30% (focus="ring").
+    local previewY = by - 36
+    local ph2 = SubH(p, ns.L["Live preview"]); ph2:SetPoint("TOPLEFT", C1, previewY); previewY = previewY - 20
+
+    local previewBox = CreateFrame("Frame", nil, p, "BackdropTemplate")
+    previewBox:SetPoint("TOPLEFT", C1, previewY)
+    previewBox:SetPoint("TOPRIGHT", p, "TOPRIGHT", -16, previewY)
+    previewBox:SetHeight(240)
+    SubPanelBackdrop(previewBox, 0.25)
+
+    local preview = ns:CreateCursorRingPreview(previewBox, "ring")
+    preview.container:SetAllPoints(previewBox)
 end
 
 -- Sub-tab 2: cast progress ring.
@@ -2256,6 +2387,19 @@ local function BuildCursorRingCastPage(p)
         cast.direction or "right",
         function(v) cast.direction=v; ns:RefreshCursorRing() end)
     dirDD:SetPoint("TOPLEFT", dirLbl, "BOTTOMLEFT", 0, -4)
+
+    -- Live preview: en esta sub-tab el cast se ve full opacity, ring/dot al 30%.
+    local previewY = y - 60
+    local ph2 = SubH(p, ns.L["Live preview"]); ph2:SetPoint("TOPLEFT", C1, previewY); previewY = previewY - 20
+
+    local previewBox = CreateFrame("Frame", nil, p, "BackdropTemplate")
+    previewBox:SetPoint("TOPLEFT", C1, previewY)
+    previewBox:SetPoint("TOPRIGHT", p, "TOPRIGHT", -16, previewY)
+    previewBox:SetHeight(240)
+    SubPanelBackdrop(previewBox, 0.25)
+
+    local preview = ns:CreateCursorRingPreview(previewBox, "cast")
+    preview.container:SetAllPoints(previewBox)
 end
 
 -- Sub-tab 3: punto central.
@@ -2397,6 +2541,19 @@ local function BuildCursorRingDotPage(p)
         function() return dot.trailVisibility end,
         function(v) dot.trailVisibility = v end)
     trailVisDD:SetPoint("LEFT", tvl, "RIGHT", 8, 0)
+
+    -- Live preview: en esta sub-tab el dot + FX se ven full opacity, ring/cast al 30%.
+    local previewY = y - 40
+    local ph2 = SubH(p, ns.L["Live preview"]); ph2:SetPoint("TOPLEFT", C1, previewY); previewY = previewY - 20
+
+    local previewBox = CreateFrame("Frame", nil, p, "BackdropTemplate")
+    previewBox:SetPoint("TOPLEFT", C1, previewY)
+    previewBox:SetPoint("TOPRIGHT", p, "TOPRIGHT", -16, previewY)
+    previewBox:SetHeight(240)
+    SubPanelBackdrop(previewBox, 0.25)
+
+    local preview = ns:CreateCursorRingPreview(previewBox, "dot")
+    preview.container:SetAllPoints(previewBox)
 end
 
 -- MRT Timeline Reminders: dos sub-tabs.
@@ -2642,11 +2799,13 @@ local function CreateMrtNoteEditor()
     local editingIdx  -- nil = add mode
     local onDone
 
-    -- Row 1: Format dropdown
+    -- Row 1: Format selector. Dos botones tipo radio (NSRT activo por defecto)
+    -- en lugar de dropdown: como solo hay 2 valores, un toggle visible es mas
+    -- claro y de un click. El boton seleccionado pinta con C_ACCENT; OnEnter
+    -- respeta el estado para que el hover no "robe" el resaltado del activo.
     local fmtLabel = p:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     fmtLabel:SetPoint("TOPLEFT", 4, -8); fmtLabel:SetText(ns.L["Format:"])
     fmtLabel:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-    local fmtItems = { { label = "MRT", value = "mrt" }, { label = "NSRT", value = "nsrt" } }
 
     local hint = p:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     hint:SetPoint("TOPLEFT", 4, -38); hint:SetWidth(560); hint:SetJustifyH("LEFT")
@@ -2660,8 +2819,34 @@ local function CreateMrtNoteEditor()
         end
     end
 
-    local fmtDD = Dropdown(p, 100, fmtItems, "mrt", function(v) UpdateHint(v) end)
-    fmtDD:SetPoint("LEFT", fmtLabel, "RIGHT", 8, 0)
+    local selectedFmt = "nsrt"
+    local nsrtBtn = Btn(p, "NSRT", 70, 22)
+    local mrtBtn  = Btn(p, "MRT",  70, 22)
+    nsrtBtn:SetPoint("LEFT", fmtLabel, "RIGHT", 8, 0)
+    mrtBtn:SetPoint("LEFT", nsrtBtn, "RIGHT", 4, 0)
+    local function PaintFmt()
+        local sel, unsel = (selectedFmt == "nsrt") and nsrtBtn or mrtBtn, (selectedFmt == "nsrt") and mrtBtn or nsrtBtn
+        sel:SetBackdropColor(C_ACCENT.r, C_ACCENT.g, C_ACCENT.b, 1)
+        sel:SetBackdropBorderColor(C_ACCENT.r, C_ACCENT.g, C_ACCENT.b, 1)
+        unsel:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
+        unsel:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.7)
+    end
+    local function MakeFmtHandlers(btn, value)
+        btn:SetScript("OnEnter", function(s)
+            if selectedFmt == value then return end
+            s:SetBackdropColor(C_HOVER.r, C_HOVER.g, C_HOVER.b, 1)
+            s:SetBackdropBorderColor(C_ACCENT.r, C_ACCENT.g, C_ACCENT.b, 0.9)
+        end)
+        btn:SetScript("OnLeave", PaintFmt)
+        btn:SetScript("OnClick", function()
+            selectedFmt = value; PaintFmt(); UpdateHint(value)
+        end)
+    end
+    MakeFmtHandlers(nsrtBtn, "nsrt")
+    MakeFmtHandlers(mrtBtn, "mrt")
+    local fmtDD = { GetValue = function() return selectedFmt end,
+                    SetValue = function(_, v) selectedFmt = (v == "mrt") and "mrt" or "nsrt"; PaintFmt(); UpdateHint(selectedFmt) end }
+    PaintFmt()
 
     -- Row 2: ID + Name inputs
     local idLabel = p:CreateFontString(nil, "OVERLAY", "GameFontNormal")
@@ -2791,7 +2976,7 @@ local function CreateMrtNoteEditor()
         editingIdx = nil; onDone = cb
         f.title:SetText(ns.L["Import note"])
         saveBtn:SetText(ns.L["Import"])
-        fmtDD:SetValue("mrt"); UpdateHint("mrt")
+        fmtDD:SetValue("nsrt"); UpdateHint("nsrt")
         idBox:SetText(""); nameBox:SetText(""); box:SetText(""); fb:SetText("")
         ApplyDiffs(nil)  -- new note default = all 4 difficulties
         f:Show(); box:SetFocus()
@@ -3102,13 +3287,23 @@ local mainWindow
 local pages, menuButtons = {}, {}
 
 function ns:CreateConfigWindow()
-    local MW=900; local MH=560; local MENUW=150
+    -- Tamaño persistido en el profile (PROFILE_DEFAULTS lo inicializa 900x560).
+    -- Sanity-clamped contra los limites de SetResizeBounds abajo, por si un
+    -- profile importado trae valores fuera de rango.
+    local cw = ns.db and ns.db.configWindow or {}
+    local MIN_W, MIN_H = 720, 420
+    local MAX_W, MAX_H = 1600, 1080
+    local MW = math.max(MIN_W, math.min(MAX_W, cw.width or 900))
+    local MH = math.max(MIN_H, math.min(MAX_H, cw.height or 560))
+    local MENUW=150
 
     mainWindow=CreateFrame("Frame","HNZHealingToolsConfigWindow",UIParent,"BackdropTemplate")
     mainWindow:SetSize(MW,MH); mainWindow:SetPoint("CENTER")
     PanelBackdrop(mainWindow)
     mainWindow:SetFrameStrata("DIALOG"); mainWindow:SetMovable(true); mainWindow:SetClampedToScreen(true)
     mainWindow:EnableMouse(true); mainWindow:SetToplevel(true); mainWindow:Hide()
+    mainWindow:SetResizable(true)
+    mainWindow:SetResizeBounds(MIN_W, MIN_H, MAX_W, MAX_H)
     table.insert(UISpecialFrames,"HNZHealingToolsConfigWindow")
 
     -- Title bar (drag region)
@@ -3128,6 +3323,25 @@ function ns:CreateConfigWindow()
     cb:SetScript("OnEnter",function(s) s:SetBackdropBorderColor(1,0.3,0.3,1); cbX:SetTextColor(1,0.3,0.3) end)
     cb:SetScript("OnLeave",function(s) s:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5); cbX:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b) end)
     cb:SetScript("OnClick",function() mainWindow:Hide() end)
+
+    -- Resize grip en la esquina inferior derecha. Usa las texturas estandar de
+    -- chat-frame para que sea reconocible. StartSizing("BOTTOMRIGHT") mantiene
+    -- la esquina TOPLEFT anclada (el SetPoint("CENTER") inicial se ignora una
+    -- vez que el usuario arrastra). OnMouseUp persiste el nuevo tamaño en
+    -- ns.db.configWindow para que sobreviva entre sesiones.
+    local rg=CreateFrame("Button",nil,mainWindow); rg:SetSize(16,16); rg:SetPoint("BOTTOMRIGHT",-2,2)
+    rg:SetFrameLevel(mainWindow:GetFrameLevel()+10)
+    rg:SetNormalTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Up")
+    rg:SetPushedTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Down")
+    rg:SetHighlightTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Highlight")
+    rg:SetScript("OnMouseDown",function() mainWindow:StartSizing("BOTTOMRIGHT") end)
+    rg:SetScript("OnMouseUp",function()
+        mainWindow:StopMovingOrSizing()
+        if ns.db.configWindow then
+            ns.db.configWindow.width = math.floor(mainWindow:GetWidth() + 0.5)
+            ns.db.configWindow.height = math.floor(mainWindow:GetHeight() + 0.5)
+        end
+    end)
 
     -- Scale +/- compactos en la barra de título (mismo z-bump que el cerrar)
     local curScale=100
@@ -3197,6 +3411,13 @@ function ns:CreateConfigWindow()
         builder(pc)
         ps:HookScript("OnShow", function(self)
             C_Timer.After(0, function() FitScrollChildHeightNow(pc, 24) end)
+        end)
+        -- Sync pc width con parentArea cuando la ventana se redimensiona. Los
+        -- elementos que usan TOPRIGHT (previews, etc.) se reflejnean solos via
+        -- anchors; los rows que usan SetSize(parent:GetWidth()-6, ...) quedan
+        -- con el ancho del momento de su build — aceptable, no rompe layout.
+        parentArea:HookScript("OnSizeChanged", function(_, w, h)
+            pc:SetWidth(w)
         end)
         return ps
     end

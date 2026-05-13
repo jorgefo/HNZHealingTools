@@ -6,6 +6,23 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ---
 
+## [1.3.0] — 2026-05-13
+
+### Added
+- **Live preview in config**: cada modulo (Ring / Pulse / Cursor Ring / Cursor Icons) muestra un preview animado al pie de su pagina de Config con datos de muestra renderizados con los settings actuales. Cualquier slider/dropdown actualiza el preview al instante.
+- **Reorder en Cursor Spells / Cursor Auras**: flechas arriba/abajo por fila para mover entries en la lista (define el orden en que aparecen junto al cursor). Texturas custom incluidas en `Textures/arrow_up.tga` (TGA 64x64, antialiased).
+- **Boton Test (T) por entry de Cursor**: fuerza al icono a aparecer junto al cursor real durante 5 segundos para previsualizar como va a verse en juego. Bypass de todos los gates (display disabled / out-of-combat / lista vacia).
+- **Ventana de config redimensionable**: drag handle en la esquina inferior derecha permite cambiar el tamano manualmente. Min 720x420, max 1600x1080. Tamano se persiste en `db.configWindow` por profile.
+- **What's New popup**: al instalar una version nueva, aparece una sola vez al login con las notas de la version. Estado persistido account-wide en `HNZHealingToolsDB.lastSeenVersion`.
+
+### Changed
+- **Selector de formato MRT/NSRT en el editor de notas**: el dropdown se reemplazo por dos botones tipo radio (NSRT a la izquierda, MRT a la derecha). El boton activo se resalta con el color de acento. NSRT pasa a ser el default al crear una nota nueva — alineado con el flujo mas comun (pegar nota de NSRT con header `EncounterID:` y dejar que el auto-detect llene ID y Name).
+
+### Fixed
+- **Pulse de MRT/NSRT no aparecia cuando la visibility del Cooldown Pulse no era `always`**: el bypass que pasa MrtTimeline a `ShowPulse` saltaba solo el toggle `enabled` del modulo, pero no el gate de visibility (`combat` / `ooc`). Si el usuario tenia `cooldownPulse.visibility = "combat"` (default de perfiles migrados desde `showOnlyInCombat = true`) y probaba la nota fuera de combate con el boton Test, el pulse nunca aparecia. Ahora `bypassEnabled = true` saltea ambos gates — MRT/NSRT solo dispara durante encounters (in-combat por definicion) y la checkbox "Show MRT/NSRT triggers" del modulo Pulse es opt-in explicito del usuario.
+
+---
+
 ## [1.2.2] — 2026-05-11
 
 ### Changed

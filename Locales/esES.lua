@@ -29,6 +29,10 @@ ns.RegisterLocale("esES", {
     ["Close"] = "Cerrar",
     ["Edit"] = "Editar",
     ["Test"] = "Probar",
+    ["Move up"] = "Mover arriba",
+    ["Move down"] = "Mover abajo",
+    ["What's New"] = "Novedades",
+    ["Got it"] = "Entendido",
     ["Create"] = "Crear",
     ["Load"] = "Cargar",
     ["Export"] = "Exportar",
@@ -216,6 +220,7 @@ ns.RegisterLocale("esES", {
     ["Appearance"] = "Apariencia",
     ["Segments (smooth)"] = "Segmentos (suavizado)",
     ["Enable ring display"] = "Habilitar display del anillo",
+    ["Live preview"] = "Vista previa en vivo",
 
     -- ===== Profiles page =====
     ["Profile Manager"] = "Gestor de perfiles",

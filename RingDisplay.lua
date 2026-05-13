@@ -5,6 +5,27 @@ local ringPool = {}
 local dataElapsed = 0
 local isVisible = true
 
+-- Test overlay (mismo patron que CursorDisplay.testEntries): entries con TTL
+-- que se inyectan al frente de UpdateRings. Bypasea enabled/visibility/empty-list
+-- gates mientras haya tests pendientes. Aura sintetica ACTIVE con countdown.
+local testEntries = {}
+
+function ns:TestRingEntry(entry, duration)
+    if not entry or not entry.spellID then return end
+    duration = duration or 5
+    local now = GetTime()
+    local expires = now + duration
+    for _, t in ipairs(testEntries) do
+        if t.entry == entry or t.entry.spellID == entry.spellID then
+            t.expires = expires; t.duration = duration; t.started = now
+            ns:MarkAuraDirty()
+            return
+        end
+    end
+    table.insert(testEntries, { entry = entry, expires = expires, started = now, duration = duration })
+    ns:MarkAuraDirty()
+end
+
 local function CreateRingFrame(parent, index)
     local db = ns.db.ringDisplay
     local radius = db.baseRadius + (index-1) * (db.ringThickness + db.ringSpacing)
@@ -90,6 +111,30 @@ local function UpdateRings()
     local ringIndex = 0
     local anyTimer = false
 
+    -- Test entries primero (rings de mas afuera). Limpieza inline de expirados.
+    local now = GetTime()
+    local hadTest = #testEntries > 0
+    for i = #testEntries, 1, -1 do
+        if testEntries[i].expires <= now then table.remove(testEntries, i) end
+    end
+    for _, t in ipairs(testEntries) do
+        local entry = t.entry
+        local color = entry.color or {r=1,g=1,b=1,a=1}
+        local _, ic = ns.GetSpellDisplayInfo(entry.spellID)
+        ringIndex = ringIndex + 1
+        local ring = GetOrCreateRing(ringIndex)
+        SetRingColor(ring, color.r, color.g, color.b, color.a)
+        local remaining = math.max(0, t.expires - now)
+        local progress = remaining / t.duration
+        SetRingProgress(ring, progress)
+        if entry.showIcon then ring.iconTex:SetTexture(ic); ring.iconFrame:Show()
+        else ring.iconFrame:Hide() end
+        ring:Show()
+        anyTimer = true
+    end
+    local hasTest = #testEntries > 0
+    if hadTest and not hasTest then ApplyRingVisibility() end
+
     for i, entry in ipairs(db.ringAuras) do
         if entry.enabled and ns.IsEntryAllowedForCurrentSpec(entry) and ns.IsEntryAllowedForRequiredTalent(entry) then
             local status = ns:GetAuraStatus(entry.spellID, entry.unit, entry.filter, entry.manualDuration)
@@ -148,8 +193,9 @@ local inCombat = false
 
 local function ApplyRingVisibility()
     if not displayAnchor then return end
-    local shouldShow = isVisible and ns.db.ringDisplay.enabled
-        and ns.MatchesVisibility(ns.db.ringDisplay.visibility, inCombat)
+    local hasTest = #testEntries > 0
+    local shouldShow = hasTest or (isVisible and ns.db.ringDisplay.enabled
+        and ns.MatchesVisibility(ns.db.ringDisplay.visibility, inCombat))
     displayAnchor:SetShown(shouldShow and true or false)
 end
 
@@ -179,8 +225,10 @@ function ns:InitRingDisplay()
     end)
 
     displayAnchor:SetScript("OnUpdate", function(self, elapsed)
-        if not isVisible or not ns.db.ringDisplay.enabled then return end
-        if #ns.db.ringAuras == 0 then return end
+        local hasTest = (#testEntries > 0)
+        if not isVisible and not hasTest then return end
+        if not ns.db.ringDisplay.enabled and not hasTest then return end
+        if #ns.db.ringAuras == 0 and not hasTest then return end
         dataElapsed = dataElapsed + elapsed
         -- Polling event-driven: antes UpdateRings corria a updateInterval (default
         -- 0.05s = 20 Hz) recorriendo todas las ringAuras y llamando GetAuraStatus
@@ -188,7 +236,7 @@ function ns:InitRingDisplay()
         -- activas y sin que ningun evento UNIT_AURA hubiera disparado. Ahora:
         --   - Si auraDirty o algun aura ticking => poll a updateInterval
         --   - Idle => 1 Hz fallback
-        local interval = (ns._auraDirtyRing or hasActiveTimer)
+        local interval = (ns._auraDirtyRing or hasActiveTimer or hasTest)
             and ns.db.ringDisplay.updateInterval or 1.0
         if dataElapsed >= interval then
             dataElapsed = 0
@@ -207,9 +255,159 @@ function ns:RefreshRingDisplay()
         displayAnchor:SetPoint("CENTER",UIParent,"CENTER",ns.db.ringDisplay.offsetX,ns.db.ringDisplay.offsetY)
     end
     ApplyRingVisibility()
+    if ns._notifyRingPreviews then ns._notifyRingPreviews() end
 end
 
-function ns:RebuildRingDisplay() DestroyAllRings(); ns:MarkAuraDirty() end
+function ns:RebuildRingDisplay()
+    DestroyAllRings()
+    ns:MarkAuraDirty()
+    if ns._notifyRingPreviews then ns._notifyRingPreviews() end
+end
+
+-- ============================================================
+-- Live preview: 3 anillos de muestra que respetan size/thickness/spacing/segments
+-- /opacity del db.ringDisplay actual. Auto-contenido — no toca displayAnchor,
+-- ringPool ni db.ringAuras. La animacion vacia cada anillo en un ciclo distinto
+-- para que el "drain" sea visible sin necesidad de tener auras reales.
+-- ============================================================
+
+local previewRegistry = {}
+
+local PREVIEW_SAMPLES = {
+    { color={r=0.30,g=0.85,b=0.78,a=1.0}, icon="Interface\\Icons\\Spell_Nature_Rejuvenation",        duration=8  },
+    { color={r=1.00,g=0.65,b=0.20,a=1.0}, icon="Interface\\Icons\\Spell_Nature_HealingWaveGreater",  duration=12 },
+    { color={r=0.70,g=0.45,b=1.00,a=1.0}, icon="Interface\\Icons\\Spell_Holy_FlashHeal",             duration=16 },
+}
+
+local function BuildPreviewRing(parent, index)
+    local db = ns.db.ringDisplay
+    local radius = db.baseRadius + (index-1) * (db.ringThickness + db.ringSpacing)
+    local numSegs = db.numSegments
+    local thickness = db.ringThickness
+
+    local ring = CreateFrame("Frame", nil, parent)
+    ring:SetSize(radius*2+thickness, radius*2+thickness)
+    ring:SetPoint("CENTER", parent, "CENTER")
+    ring:EnableMouse(false)
+    ring.lines = {}
+    ring.radius = radius
+
+    for i = 1, numSegs do
+        local a1 = (i-1)*(2*math.pi/numSegs) - (math.pi/2)
+        local a2 = i*(2*math.pi/numSegs) - (math.pi/2)
+        local line = ring:CreateLine(nil, "ARTWORK", nil, index)
+        line:SetThickness(thickness)
+        line:SetStartPoint("CENTER", ring, math.cos(a1)*radius, math.sin(a1)*radius)
+        line:SetEndPoint("CENTER", ring, math.cos(a2)*radius, math.sin(a2)*radius)
+        line:SetColorTexture(1,1,1,1)
+        ring.lines[i] = line
+    end
+
+    local iconSize = math.max(thickness+4, 14)
+    local iconFrame = CreateFrame("Frame", nil, ring)
+    iconFrame:SetSize(iconSize, iconSize); iconFrame:SetPoint("CENTER", ring, "CENTER", 0, radius)
+    iconFrame:EnableMouse(false)
+    local iconBg = iconFrame:CreateTexture(nil, "BACKGROUND"); iconBg:SetAllPoints(); iconBg:SetColorTexture(0,0,0,0.8)
+    local iconTex = iconFrame:CreateTexture(nil, "ARTWORK")
+    iconTex:SetPoint("TOPLEFT", 1, -1); iconTex:SetPoint("BOTTOMRIGHT", -1, 1)
+    iconTex:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+    ring.iconTex = iconTex; ring.iconFrame = iconFrame
+
+    return ring
+end
+
+local function PreviewSetProgress(ring, progress)
+    local n = #ring.lines
+    if progress < 0 then progress = 0 elseif progress > 1 then progress = 1 end
+    local pos = progress * n
+    local full = math.floor(pos)
+    local frac = pos - full
+    for i = 1, n do
+        local line = ring.lines[i]
+        if i <= full then line:SetShown(true); line:SetAlpha(1)
+        elseif i == full+1 and frac > 0 then line:SetShown(true); line:SetAlpha(frac)
+        else line:SetShown(false) end
+    end
+end
+
+local function PreviewSetColor(ring, r, g, b, a)
+    for _, line in ipairs(ring.lines) do line:SetColorTexture(r, g, b, a or 1) end
+end
+
+function ns:CreateRingPreview(parent)
+    local container = CreateFrame("Frame", nil, parent)
+    container:EnableMouse(false)
+
+    local anchor = CreateFrame("Frame", nil, container)
+    anchor:SetSize(2,2); anchor:SetPoint("CENTER")
+
+    local preview = { container = container, anchor = anchor, rings = {}, startTime = GetTime() }
+
+    local function Destroy()
+        for _, ring in ipairs(preview.rings) do
+            for _, line in ipairs(ring.lines) do line:Hide() end
+            ring:Hide(); ring:ClearAllPoints(); ring:SetParent(nil)
+        end
+        wipe(preview.rings)
+    end
+
+    local function Rebuild()
+        Destroy()
+        local db = ns.db.ringDisplay
+        local n = #PREVIEW_SAMPLES
+        for i = 1, n do
+            local sample = PREVIEW_SAMPLES[i]
+            local ring = BuildPreviewRing(anchor, i)
+            PreviewSetColor(ring, sample.color.r, sample.color.g, sample.color.b, sample.color.a)
+            ring.iconTex:SetTexture(sample.icon)
+            ring.iconFrame:Show()
+            preview.rings[i] = ring
+        end
+        local cw = container:GetWidth() or 0
+        local ch = container:GetHeight() or 0
+        local thickness = db.ringThickness
+        local spacing = db.ringSpacing
+        local baseR = db.baseRadius
+        local iconSize = math.max(thickness+4, 14)
+        local outerR = baseR + (n-1)*(thickness+spacing) + thickness/2 + iconSize
+        local maxR = math.min(cw, ch)/2 - 6
+        if maxR <= 0 or outerR <= 0 then
+            anchor:SetScale(1)
+        else
+            local scale = math.min(1, maxR / outerR)
+            if scale < 0.2 then scale = 0.2 end
+            anchor:SetScale(scale)
+        end
+        anchor:SetAlpha(db.opacity)
+    end
+
+    preview.Refresh = Rebuild
+
+    container:SetScript("OnUpdate", function()
+        if #preview.rings == 0 then return end
+        local t = GetTime() - preview.startTime
+        for i, ring in ipairs(preview.rings) do
+            local sample = PREVIEW_SAMPLES[i]
+            local dur = sample.duration or 8
+            local phase = (t % dur) / dur
+            PreviewSetProgress(ring, 1 - phase)
+        end
+    end)
+
+    container:HookScript("OnSizeChanged", Rebuild)
+    container:HookScript("OnShow", Rebuild)
+    table.insert(previewRegistry, preview)
+
+    -- Rebuild diferido para que el layout de los anchors padre se haya resuelto.
+    C_Timer.After(0, Rebuild)
+    return preview
+end
+
+ns._notifyRingPreviews = function()
+    for _, p in ipairs(previewRegistry) do
+        if p.container:IsShown() then p.Refresh() end
+    end
+end
 
 function ns:DumpRingStatus()
     print("|cff00ccff[SAT ring]|r")

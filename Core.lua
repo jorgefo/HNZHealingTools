@@ -158,6 +158,13 @@ function ns.RestoreFromBackup(name)
 end
 
 ns.PROFILE_DEFAULTS = {
+    -- Tamaño persistido de la ventana de config. Se actualiza cuando el usuario
+    -- arrastra la esquina de resize. Min/max clampeados por SetResizeBounds en
+    -- Config.lua (no aceptes valores de aqui sin sanitar).
+    configWindow = {
+        width = 900,
+        height = 560,
+    },
     -- Cursor display
     cursorSpells = {},
     cursorAuras = {},
@@ -392,6 +399,11 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
         ns:InitMinimapButton()
         print(string.format("|cff00ccffHNZ Healing Tools|r %s. %s |cff00ff00%s|r. %s |cff00ff00/hht|r %s.",
             ns.L["loaded"], ns.L["Profile:"], active, ns.L["Type"], ns.L["for options"]))
+        -- Defer al final del flujo de login para que el popup salga despues del
+        -- mensaje de "loaded", y solo una vez todos los modulos esten listos.
+        if ns.ShowWhatsNewIfNeeded then
+            C_Timer.After(1.5, function() ns:ShowWhatsNewIfNeeded() end)
+        end
         self:UnregisterEvent("PLAYER_LOGIN")
     end
 end)

@@ -100,16 +100,22 @@ local function CreatePulseFrame()
     return f
 end
 
--- bypassEnabled: cuando true, ignora el toggle `enabled` del cooldownPulse module.
--- Lo usa MrtTimeline para disparar pulses como visualizacion de sus triggers
--- aunque el cooldownPulse general este off (el usuario activo MRT->Pulse desde
--- otro menu y no deberia tener que habilitar tambien cooldownPulse).
+-- bypassEnabled: cuando true, ignora el toggle `enabled` Y el gate de visibility
+-- del cooldownPulse module. Lo usa MrtTimeline para disparar pulses como
+-- visualizacion de sus triggers aunque el cooldownPulse general este off (el
+-- usuario activo MRT->Pulse desde otro menu y no deberia tener que habilitar
+-- tambien cooldownPulse). Tambien bypaseamos visibility porque MRT solo dispara
+-- durante encounters (in-combat por definicion) y porque si el usuario tiene
+-- cooldownPulse.visibility="combat" pero prueba la nota fuera de combate con el
+-- boton de test, el pulse no aparecia.
 function ns:ShowPulse(icon, name, soundEnabled, soundName, soundChannel, bypassEnabled)
     local s = GetSettings()
-    if not bypassEnabled and s and s.enabled == false then return end
-    -- Combat-gate via visibility ("always"|"combat"|"ooc"). Aplica a la animacion
-    -- + sonido (sonidos de READY fuera de combate son ruido para muchos healers).
-    if s and not ns.MatchesVisibility(s.visibility, inCombat) then return end
+    if not bypassEnabled then
+        if s and s.enabled == false then return end
+        -- Combat-gate via visibility ("always"|"combat"|"ooc"). Aplica a la animacion
+        -- + sonido (sonidos de READY fuera de combate son ruido para muchos healers).
+        if s and not ns.MatchesVisibility(s.visibility, inCombat) then return end
+    end
     if not pulseFrame then pulseFrame = CreatePulseFrame() end
 
     ApplyPlacement(pulseFrame)
@@ -237,6 +243,7 @@ function ns:ResetCooldownPulseCache() ResetCache() end
 function ns:RefreshCooldownPulse()
     if pulseFrame then ApplyPlacement(pulseFrame) end
     if ns._pulseAnchor then ns:RefreshCooldownPulseAnchor() end
+    if ns._notifyCooldownPulsePreviews then ns._notifyCooldownPulsePreviews() end
 end
 
 -- Anchor visible y movible para reposicionar el pulse. Mientras esta visible
@@ -317,6 +324,17 @@ function ns:IsCooldownPulseAnchorShown()
     return ns._pulseAnchor and ns._pulseAnchor:IsShown() or false
 end
 
+function ns:TestPulseEntry(entry)
+    -- Test per-entry desde el row del config: dispara un pulse one-shot con el
+    -- icono/sonido de esta entry especifica (bypass del toggle enabled global).
+    if not entry or not entry.spellID then return end
+    local nm, ic = ns.GetSpellDisplayInfo(entry.spellID)
+    local soundEnabled = entry.soundEnabled or entry.cdPulseSound
+    local soundName = entry.soundName or entry.cdPulseSoundName
+    local soundChannel = entry.soundChannel
+    ns:ShowPulse(ic, nm, soundEnabled, soundName, soundChannel, true)
+end
+
 function ns:TestCooldownPulse()
     -- Used by the config "Test" button: prefiere pulseSpells, después legacy cdPulse, después fallback.
     local db = ns.db or {}
@@ -336,6 +354,141 @@ function ns:TestCooldownPulse()
         ns:ShowPulse(st.icon, st.name, soundEnabled, soundName, entry.soundChannel)
     else
         ns:ShowPulse(134400, "Test", false)
+    end
+end
+
+-- ============================================================
+-- Live preview: dispara un pulse de muestra en loop usando los settings actuales
+-- (iconSize / opacity / holdDuration). Auto-contenido — no toca pulseFrame ni
+-- el anchor real. Rebota entre 3 iconos para que se note que esta animado.
+-- ============================================================
+
+local previewRegistry = {}
+
+local PREVIEW_SAMPLES = {
+    { icon = "Interface\\Icons\\Spell_Holy_FlashHeal",            name = "Flash Heal"    },
+    { icon = "Interface\\Icons\\Spell_Nature_Rejuvenation",       name = "Rejuvenation"  },
+    { icon = "Interface\\Icons\\Spell_Nature_HealingWaveGreater", name = "Healing Wave"  },
+}
+
+local function BuildPreviewPulse(parent)
+    local f = CreateFrame("Frame", nil, parent)
+    f:SetSize(80, 80)
+    f:SetPoint("CENTER", parent, "CENTER")
+    f:EnableMouse(false)
+    f:Hide()
+
+    local border = f:CreateTexture(nil, "BACKGROUND")
+    border:SetPoint("TOPLEFT", -2, 2); border:SetPoint("BOTTOMRIGHT", 2, -2)
+    border:SetColorTexture(0, 0, 0, 0.85)
+    f.border = border
+
+    local icon = f:CreateTexture(nil, "ARTWORK")
+    icon:SetAllPoints()
+    icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+    f.icon = icon
+
+    local glow = f:CreateTexture(nil, "OVERLAY")
+    glow:SetPoint("TOPLEFT", -8, 8); glow:SetPoint("BOTTOMRIGHT", 8, -8)
+    glow:SetColorTexture(1, 1, 1, 0.25); glow:SetBlendMode("ADD")
+    f.glow = glow
+
+    local name = f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+    name:SetPoint("TOP", f, "BOTTOM", 0, -6)
+    name:SetShadowOffset(1, -1); name:SetTextColor(1, 1, 1)
+    f.name = name
+
+    local ag = f:CreateAnimationGroup()
+    f.ag = ag
+
+    local fadeIn = ag:CreateAnimation("Alpha")
+    fadeIn:SetFromAlpha(0); fadeIn:SetToAlpha(1); fadeIn:SetDuration(0.18); fadeIn:SetOrder(1)
+    local scaleIn = ag:CreateAnimation("Scale")
+    scaleIn:SetScaleFrom(1.8, 1.8); scaleIn:SetScaleTo(1.0, 1.0)
+    scaleIn:SetDuration(0.18); scaleIn:SetOrder(1); scaleIn:SetOrigin("CENTER", 0, 0)
+
+    local hold = ag:CreateAnimation("Alpha")
+    hold:SetFromAlpha(1); hold:SetToAlpha(1); hold:SetDuration(0.55); hold:SetOrder(2)
+    f.holdAnim = hold
+
+    local fadeOut = ag:CreateAnimation("Alpha")
+    fadeOut:SetFromAlpha(1); fadeOut:SetToAlpha(0); fadeOut:SetDuration(0.40); fadeOut:SetOrder(3)
+    local scaleOut = ag:CreateAnimation("Scale")
+    scaleOut:SetScaleFrom(1.0, 1.0); scaleOut:SetScaleTo(0.6, 0.6)
+    scaleOut:SetDuration(0.40); scaleOut:SetOrder(3); scaleOut:SetOrigin("CENTER", 0, 0)
+
+    ag:SetScript("OnFinished", function() f:Hide() end)
+    return f
+end
+
+function ns:CreateCooldownPulsePreview(parent)
+    local container = CreateFrame("Frame", nil, parent)
+    container:EnableMouse(false)
+
+    local pulseF = BuildPreviewPulse(container)
+    local preview = { container = container, pulseFrame = pulseF, idx = 0, lastTrigger = -math.huge }
+
+    local function ApplySize()
+        local s = ns.db.cooldownPulse or {}
+        local size = s.iconSize or 80
+        local ch = container:GetHeight() or 0
+        local cw = container:GetWidth() or 0
+        -- Reservamos ~30 px verticales para el texto debajo del icono.
+        local maxSize = math.min(ch - 30, cw) * 0.65
+        if maxSize > 0 and size > maxSize then
+            pulseF:SetScale(maxSize / size)
+        else
+            pulseF:SetScale(1)
+        end
+        pulseF:SetSize(size, size)
+        pulseF:ClearAllPoints()
+        pulseF:SetPoint("CENTER", container, "CENTER", 0, 0)
+    end
+
+    local function Trigger()
+        local s = ns.db.cooldownPulse or {}
+        ApplySize()
+        preview.idx = preview.idx + 1
+        local sample = PREVIEW_SAMPLES[((preview.idx - 1) % #PREVIEW_SAMPLES) + 1]
+        pulseF.icon:SetTexture(sample.icon)
+        pulseF.name:SetText(sample.name)
+        if pulseF.holdAnim and s.holdDuration then
+            pulseF.holdAnim:SetDuration(mathmax(0.05, s.holdDuration))
+        end
+        pulseF:SetAlpha(s.opacity or 1.0)
+        pulseF.ag:Stop()
+        pulseF:Show()
+        pulseF.ag:Play()
+    end
+
+    preview.Refresh = ApplySize
+    preview.Trigger = Trigger
+
+    container:SetScript("OnUpdate", function()
+        local s = ns.db.cooldownPulse or {}
+        local now = GetTime()
+        -- cycle = fade-in (0.18) + hold + fade-out (0.40) + idle gap (1.2)
+        local cycle = (s.holdDuration or 0.55) + 1.78
+        if now - preview.lastTrigger >= cycle then
+            preview.lastTrigger = now
+            Trigger()
+        end
+    end)
+
+    container:HookScript("OnSizeChanged", ApplySize)
+    container:HookScript("OnShow", function()
+        preview.lastTrigger = -math.huge
+        ApplySize()
+    end)
+    table.insert(previewRegistry, preview)
+
+    C_Timer.After(0, ApplySize)
+    return preview
+end
+
+ns._notifyCooldownPulsePreviews = function()
+    for _, p in ipairs(previewRegistry) do
+        if p.container:IsShown() then p.Refresh() end
     end
 end
 

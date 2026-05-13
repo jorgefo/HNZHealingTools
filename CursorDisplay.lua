@@ -320,6 +320,185 @@ function ns:RefreshCursorDisplay()
     if displayFrame then displayFrame:SetAlpha(ns.db.cursorDisplay.opacity) end
     RefreshHotCaches()
     ApplyCursorVisibility()
+    if ns._notifyCursorDisplayPreviews then ns._notifyCursorDisplayPreviews() end
+end
+
+-- ============================================================
+-- Live preview: cursor virtual moviendose dentro del frame con 5 iconos sample
+-- (3 spells + 2 auras). Cada uno simula su propio ciclo de status (READY,
+-- COOLDOWN con countdown, OUT_OF_RANGE, ACTIVE con stacks, MISSING). El grid
+-- de iconos respeta iconSize/iconSpacing/maxColumns/fontSize/offset/opacity.
+-- ============================================================
+
+local previewRegistry = {}
+
+local PREVIEW_SAMPLES = {
+    { kind="spell",         icon="Interface\\Icons\\Spell_Holy_FlashHeal",            cycle=6, downtime=3 },
+    { kind="spell-charges", icon="Interface\\Icons\\Spell_Nature_Rejuvenation",       charges=2, maxCharges=3 },
+    { kind="spell-range",   icon="Interface\\Icons\\Spell_Nature_HealingWaveGreater", cycle=5, oor=2 },
+    { kind="aura",          icon="Interface\\Icons\\Spell_Nature_Bloodlust",          duration=8, stacks=3 },
+    { kind="aura-missing",  icon="Interface\\Icons\\Spell_Shadow_DemonicEmpathy" },
+}
+
+local function BuildPreviewIcon(parent)
+    local f = CreateFrame("Frame", nil, parent)
+    f:EnableMouse(false)
+    local border = f:CreateTexture(nil, "BACKGROUND"); border:SetAllPoints(); border:SetColorTexture(0, 0, 0, 1)
+    f.border = border
+    local icon = f:CreateTexture(nil, "ARTWORK")
+    icon:SetPoint("TOPLEFT", 1, -1); icon:SetPoint("BOTTOMRIGHT", -1, 1)
+    icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+    f.icon = icon
+    local text = f:CreateFontString(nil, "OVERLAY")
+    text:SetFont(STANDARD_TEXT_FONT, 12, "OUTLINE")
+    text:SetPoint("CENTER"); text:SetShadowOffset(1, -1)
+    f.text = text
+    local chargeText = f:CreateFontString(nil, "OVERLAY")
+    chargeText:SetFont(STANDARD_TEXT_FONT, 12, "OUTLINE")
+    chargeText:SetPoint("BOTTOMRIGHT", -1, 1); chargeText:SetJustifyH("RIGHT"); chargeText:SetShadowOffset(1, -1)
+    f.chargeText = chargeText
+    local statusBorder = f:CreateTexture(nil, "OVERLAY"); statusBorder:SetAllPoints()
+    statusBorder:SetColorTexture(1, 1, 1, 0.3); statusBorder:SetBlendMode("ADD")
+    f.statusBorder = statusBorder
+    return f
+end
+
+local function PreviewComputeState(sample, t)
+    local status = "READY"
+    local cdRem, stacks, remaining, charges, maxCharges
+    if sample.kind == "spell" then
+        local phase = t % sample.cycle
+        if phase < sample.cycle - sample.downtime then
+            status = "READY"
+        else
+            status = "COOLDOWN"
+            cdRem = sample.cycle - phase
+        end
+    elseif sample.kind == "spell-charges" then
+        status = "READY"; charges = sample.charges; maxCharges = sample.maxCharges
+    elseif sample.kind == "spell-range" then
+        local phase = t % sample.cycle
+        status = (phase < sample.cycle - sample.oor) and "READY" or "OUT_OF_RANGE"
+    elseif sample.kind == "aura" then
+        status = "ACTIVE"
+        local phase = t % sample.duration
+        remaining = sample.duration - phase
+        stacks = sample.stacks
+    elseif sample.kind == "aura-missing" then
+        status = "MISSING"
+    end
+    return status, cdRem, stacks, remaining, charges, maxCharges
+end
+
+local function UpdatePreviewIcon(iconFrame, sample, t, size, fontSize)
+    iconFrame:SetSize(size, size)
+    iconFrame.icon:SetTexture(sample.icon)
+    local status, cdRem, stacks, remaining, charges, maxCharges = PreviewComputeState(sample, t)
+    local desat = (status == "UNUSABLE" or status == "MISSING" or status == "NO_POWER")
+    iconFrame.icon:SetDesaturated(desat)
+    local color = STATUS_COLORS[status] or STATUS_COLORS.UNUSABLE
+    iconFrame.statusBorder:SetColorTexture(color[1], color[2], color[3], 0.3)
+    ApplyFontSize(iconFrame.text, fontSize)
+    ApplyFontSize(iconFrame.chargeText, fontSize)
+    iconFrame.text:SetText("")
+    iconFrame.chargeText:SetText(""); iconFrame.chargeText:Hide()
+    if charges and maxCharges and maxCharges > 1 then
+        if charges > 1 then
+            iconFrame.chargeText:SetText(charges); iconFrame.chargeText:Show()
+        end
+    else
+        if cdRem and cdRem > 0 then
+            iconFrame.text:SetText(ns.FormatDuration and ns.FormatDuration(cdRem) or string.format("%.0f", cdRem))
+        elseif remaining and remaining > 0 then
+            iconFrame.text:SetText(ns.FormatDuration and ns.FormatDuration(remaining) or string.format("%.0f", remaining))
+        end
+        if stacks and stacks > 1 then
+            iconFrame.chargeText:SetText(stacks); iconFrame.chargeText:Show()
+        end
+    end
+    iconFrame:Show()
+end
+
+function ns:CreateCursorDisplayPreview(parent)
+    local container = CreateFrame("Frame", nil, parent)
+    container:EnableMouse(false)
+
+    local fauxDisplay = CreateFrame("Frame", nil, container)
+    fauxDisplay:SetSize(1, 1)
+    fauxDisplay:EnableMouse(false)
+
+    local icons = {}
+    for i = 1, #PREVIEW_SAMPLES do
+        icons[i] = BuildPreviewIcon(fauxDisplay)
+        icons[i]:Hide()
+    end
+
+    local startTime = GetTime()
+    local preview = { container = container, fauxDisplay = fauxDisplay, icons = icons }
+
+    local function GetVirtualCursor(t)
+        local cw, ch = container:GetWidth() or 1, container:GetHeight() or 1
+        -- Recorrido amplio dejando padding arriba-derecha para el grid de iconos.
+        local cx = cw * 0.18 + cw * 0.32 * (0.5 + 0.5 * math.sin(t * 0.6))
+        local cy = ch * 0.20 + ch * 0.35 * (0.5 + 0.5 * math.sin(t * 0.9 + 1))
+        return cx, cy
+    end
+
+    local function ApplyAll()
+        local d = ns.db and ns.db.cursorDisplay
+        if not d then return end
+        container:SetAlpha(d.opacity or 1)
+    end
+
+    preview.Refresh = ApplyAll
+
+    container:SetScript("OnUpdate", function()
+        local d = ns.db and ns.db.cursorDisplay
+        if not d then return end
+        local size    = d.iconSize    or 24
+        local spacing = d.iconSpacing or 2
+        local maxCols = d.maxColumns  or 4
+        local fontSize= d.fontSize    or 12
+        local offX    = d.offsetX     or 0
+        local offY    = d.offsetY     or 0
+
+        local n = #icons
+        local cols = math.min(n, maxCols)
+        local rows = math.ceil(n / maxCols)
+        local fw = cols * (size + spacing) - spacing
+        local fh = rows * (size + spacing) - spacing
+        fauxDisplay:SetSize(math.max(fw, 1), math.max(fh, 1))
+
+        local t = GetTime() - startTime
+        local cx, cy = GetVirtualCursor(t)
+
+        fauxDisplay:ClearAllPoints()
+        fauxDisplay:SetPoint("BOTTOMLEFT", container, "BOTTOMLEFT", cx + offX, cy + offY)
+
+        for i = 1, n do
+            local col = (i - 1) % maxCols
+            local row = math.floor((i - 1) / maxCols)
+            local f = icons[i]
+            f:ClearAllPoints()
+            f:SetPoint("TOPLEFT", fauxDisplay, "TOPLEFT", col * (size + spacing), -row * (size + spacing))
+            UpdatePreviewIcon(f, PREVIEW_SAMPLES[i], t, size, fontSize)
+        end
+
+        container:SetAlpha(d.opacity or 1)
+    end)
+
+    container:HookScript("OnSizeChanged", ApplyAll)
+    container:HookScript("OnShow", ApplyAll)
+    table.insert(previewRegistry, preview)
+
+    C_Timer.After(0, ApplyAll)
+    return preview
+end
+
+ns._notifyCursorDisplayPreviews = function()
+    for _, p in ipairs(previewRegistry) do
+        if p.container:IsShown() then p.Refresh() end
+    end
 end
 
 function ns:DumpCursorStatus()

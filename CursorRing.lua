@@ -618,6 +618,10 @@ local function CreateRingFrame()
     end)
 end
 
+-- Forward decl: definido al final del archivo. RefreshCursorRing lo invoca para
+-- que cualquier preview embebido en el config se sincronice con los sliders.
+local NotifyCursorRingPreviews
+
 function ns:RefreshCursorRing()
     local s = ns.db and ns.db.cursorRing
     if not s then return end
@@ -645,6 +649,7 @@ function ns:RefreshCursorRing()
     end
     ApplyDotVisuals()
     frame:Show()
+    if NotifyCursorRingPreviews then NotifyCursorRingPreviews() end
 end
 
 function ns:ToggleCursorRing()
@@ -715,4 +720,326 @@ function ns:InitCursorRing()
     end
     inCombat = InCombatLockdown()
     ns:RefreshCursorRing()
+end
+
+-- ============================================================
+-- Live preview: simula un cursor virtual moviendose dentro del frame del preview
+-- y renderiza ring + cast (animacion ciclica) + dot + trail + sparkle con los
+-- settings actuales de ns.db.cursorRing. Auto-contenido — su FX pool y todas
+-- las texturas son locales al preview, no tocan el frame/fxPool reales.
+-- ============================================================
+
+local previewRegistry = {}
+
+local function BuildPreviewSurface(parent)
+    local f = CreateFrame("Frame", nil, parent)
+    f:EnableMouse(false)
+    f.tex = f:CreateTexture(nil, "ARTWORK")
+    f.tex:SetAllPoints()
+    f.tex:SetBlendMode("BLEND")
+
+    f.castFrame = CreateFrame("Frame", nil, f)
+    f.castFrame:SetPoint("CENTER", f, "CENTER")
+    f.castFrame:EnableMouse(false)
+    f.castSegments = {}
+    for i = 1, NUM_CAST_SEGMENTS do
+        local seg = f.castFrame:CreateTexture(nil, "OVERLAY")
+        seg:SetTexture(CAST_WEDGE_TEXTURE)
+        seg:SetAllPoints()
+        seg:SetBlendMode("BLEND")
+        seg:SetRotation(mathrad((i - 1) * (360 / NUM_CAST_SEGMENTS)))
+        seg:SetAlpha(0)
+        f.castSegments[i] = seg
+    end
+
+    f.dotTex = f:CreateTexture(nil, "OVERLAY")
+    f.dotTex:SetTexture(DOT_TEXTURE)
+    f.dotTex:SetPoint("CENTER", f, "CENTER")
+    f.dotTex:SetBlendMode("BLEND")
+    f.dotTex:Hide()
+
+    return f
+end
+
+-- focus puede ser "ring", "cast", o "dot": pinta esa feature al 100% y las otras
+-- dos al 30% para que se vea claro cual sub-tab esta editando el usuario. Si no
+-- se pasa, todo va al 100% (comportamiento original).
+local FOCUS_DIM = 0.30
+local FOCUS_MASKS = {
+    ring = { ring = 1.0,       cast = FOCUS_DIM, dot = FOCUS_DIM },
+    cast = { ring = FOCUS_DIM, cast = 1.0,       dot = FOCUS_DIM },
+    dot  = { ring = FOCUS_DIM, cast = FOCUS_DIM, dot = 1.0       },
+}
+
+function ns:CreateCursorRingPreview(parent, focus)
+    local container = CreateFrame("Frame", nil, parent)
+    container:EnableMouse(false)
+    local focusMask = FOCUS_MASKS[focus] or { ring = 1, cast = 1, dot = 1 }
+
+    -- FX frame anclado al container (trail/sparkles se quedan dentro de la caja
+    -- en vez de seguir al cursor real). Pool propio para evitar conflictos con
+    -- el FX pool real del modulo.
+    local fxF = CreateFrame("Frame", nil, container)
+    fxF:SetAllPoints()
+    fxF:SetFrameLevel((container:GetFrameLevel() or 1) + 5)
+    fxF:EnableMouse(false)
+    local fxPool = {}
+
+    local function AcquireFX()
+        for i = 1, #fxPool do
+            if not fxPool[i].tex:IsShown() then return fxPool[i] end
+        end
+        local e = {}
+        e.tex = fxF:CreateTexture(nil, "OVERLAY")
+        e.tex:SetTexture(DOT_TEXTURE)
+        e.tex:SetBlendMode("ADD")
+        e.tex:Hide()
+        fxPool[#fxPool+1] = e
+        return e
+    end
+
+    local ringF = BuildPreviewSurface(container)
+    ringF:SetFrameLevel((container:GetFrameLevel() or 1) + 8)
+
+    local startTime = GetTime()
+    local lastTrailX, lastTrailY = -math.huge, -math.huge
+    local lastTrailTime = 0
+    local lastSparkleX, lastSparkleY = -math.huge, -math.huge
+    local lastSparkleTime = 0
+    local lastNumLit = 0
+    local castDirection = "right"
+
+    local preview = { container = container, ringFrame = ringF }
+
+    local function PreviewWedgeAt(k)
+        if castDirection == "left" and k > 1 then
+            return NUM_CAST_SEGMENTS - k + 2
+        end
+        return k
+    end
+
+    local function GetVirtualCursor(t)
+        local cw, ch = container:GetWidth() or 1, container:GetHeight() or 1
+        local margin = 24
+        local rx = mathmax(8, (cw  - margin*2) / 2)
+        local ry = mathmax(8, (ch - margin*2) / 2)
+        local r = mathmin(rx, ry) * 0.85
+        local cx, cy = cw/2, ch/2
+        -- Lissajous: speeds distintos en x/y para variar el path y que el
+        -- trail/sparkle se vean ondulando, no solo girando en circulo.
+        local x = cx + r * math.sin(t * 0.8)
+        local y = cy + r * math.sin(t * 1.3) * 0.7
+        return x, y
+    end
+
+    local function ApplyAll()
+        local s = ns.db and ns.db.cursorRing
+        if not s then return end
+
+        -- Ring decorativo. La alpha final = opacity * focusMask.ring para dim de
+        -- las features no enfocadas (configurable via FOCUS_MASKS).
+        local size = s.size or 48
+        ringF:SetSize(size, size)
+        if s.enabled then
+            ringF.tex:Show()
+            ringF.tex:SetTexture(ResolveTexture(s.texture or DEFAULT_TEXTURE))
+            local r, g, b = GetEffectiveColor(s)
+            ringF.tex:SetVertexColor(r, g, b, (s.opacity or 1) * focusMask.ring)
+        else
+            ringF.tex:Hide()
+        end
+
+        -- Cast. SetAlpha en castFrame multiplica todas las wedges hijas, asi el
+        -- dim afecta tanto a las "lit" (alpha=castOpacity) como a las "off" (0).
+        local cast = s.cast or {}
+        local cc = cast.color or { r=0.2, g=0.82, b=0.68 }
+        for i = 1, NUM_CAST_SEGMENTS do
+            ringF.castSegments[i]:SetVertexColor(cc.r or 1, cc.g or 1, cc.b or 1, 1)
+        end
+        local castSize = cast.size or size
+        if castSize < 4 then castSize = 4 end
+        ringF.castFrame:SetSize(castSize, castSize)
+        ringF.castFrame:SetAlpha(focusMask.cast)
+        if cast.enabled then ringF.castFrame:Show() else ringF.castFrame:Hide() end
+
+        local newDir = cast.direction or "right"
+        if newDir ~= "left" then newDir = "right" end
+        if newDir ~= castDirection then
+            castDirection = newDir
+            for i = 1, NUM_CAST_SEGMENTS do ringF.castSegments[i]:SetAlpha(0) end
+            lastNumLit = 0
+        end
+
+        -- Dot + FX (trail/sparkle): comparten focusMask.dot. SetAlpha en fxF
+        -- multiplica todas las particulas vivas; el fade per-particula sigue
+        -- funcionando (su SetAlpha animado se multiplica).
+        local dot = s.dot or {}
+        if dot.enabled then
+            local dsize = dot.size or 6
+            if dsize < 1 then dsize = 1 end
+            ringF.dotTex:SetSize(dsize, dsize)
+            local dc = dot.color or { r=1, g=1, b=1, a=1 }
+            ringF.dotTex:SetVertexColor(dc.r or 1, dc.g or 1, dc.b or 1, (dc.a or 1) * focusMask.dot)
+            ringF.dotTex:Show()
+        else
+            ringF.dotTex:Hide()
+        end
+        fxF:SetAlpha(focusMask.dot)
+    end
+
+    preview.Refresh = ApplyAll
+
+    container:SetScript("OnUpdate", function()
+        local s = ns.db and ns.db.cursorRing
+        if not s then return end
+
+        local t = GetTime() - startTime
+        local x, y = GetVirtualCursor(t)
+
+        ringF:ClearAllPoints()
+        ringF:SetPoint("CENTER", container, "BOTTOMLEFT", x, y)
+
+        local dot = s.dot or {}
+        local now = GetTime()
+
+        -- Trail
+        if dot.enabled and dot.trail then
+            local dx = x - lastTrailX
+            local dy = y - lastTrailY
+            if (dx*dx + dy*dy) >= TRAIL_MIN_MOVE_SQ and (now - lastTrailTime) >= TRAIL_SPAWN_INTERVAL then
+                local e = AcquireFX()
+                e.kind = "trail"
+                e.born = now
+                e.lifetime = dot.trailLength or TRAIL_LIFETIME
+                local sz = (dot.size or 6) * 1.2
+                e.startSize = sz
+                e.tex:SetSize(sz, sz)
+                e.tex:ClearAllPoints()
+                e.tex:SetPoint("CENTER", container, "BOTTOMLEFT", x, y)
+                e.tex:SetTexture(DOT_TEXTURE)
+                local c = dot.trailColor or dot.color or {r=1,g=1,b=1,a=1}
+                e.tex:SetVertexColor(c.r or 1, c.g or 1, c.b or 1, c.a or 1)
+                e.tex:SetAlpha(1); e.tex:SetRotation(0); e.tex:Show()
+                lastTrailX, lastTrailY = x, y
+                lastTrailTime = now
+            end
+        end
+
+        -- Sparkle
+        if dot.enabled and dot.sparkle and (now - lastSparkleTime) >= SPARKLE_SPAWN_INTERVAL then
+            local function SpawnAt(sx, sy)
+                local e = AcquireFX()
+                e.kind = "sparkle"
+                e.born = now
+                e.lifetime = SPARKLE_LIFETIME
+                local ang = math.random() * 6.2831853
+                local dist = math.random() * SPARKLE_MAX_RADIUS
+                local fx, fy = sx + math.cos(ang) * dist, sy + math.sin(ang) * dist
+                local base = dot.size or 6
+                local mult = dot.sparkleSize or 1.0
+                e.startSize = base * 0.6 * mult
+                e.endSize = base * 1.6 * mult
+                e.tex:SetSize(e.startSize, e.startSize)
+                e.tex:ClearAllPoints()
+                e.tex:SetPoint("CENTER", container, "BOTTOMLEFT", fx, fy)
+                e.tex:SetTexture(PickSparkleTexture(dot.sparkleShape or "dot"))
+                local c = dot.sparkleColor or dot.color or {r=1,g=1,b=1,a=1}
+                e.tex:SetVertexColor(c.r or 1, c.g or 1, c.b or 1, c.a or 1)
+                e.tex:SetAlpha(1)
+                e.tex:SetRotation(math.random() * 6.2831853)
+                e.tex:Show()
+            end
+            if lastSparkleX <= -math.huge or (now - lastSparkleTime) > SPARKLE_RESET_GAP then
+                SpawnAt(x, y)
+            else
+                local dx = x - lastSparkleX
+                local dy = y - lastSparkleY
+                local dist = math.sqrt(dx*dx + dy*dy)
+                local n = mathfloor(dist / SPARKLE_PATH_SPACING) + 1
+                if n < 1 then n = 1 end
+                if n > SPARKLE_MAX_PER_TICK then n = SPARKLE_MAX_PER_TICK end
+                for i = 1, n do
+                    local tt = i / n
+                    SpawnAt(lastSparkleX + dx * tt, lastSparkleY + dy * tt)
+                end
+            end
+            lastSparkleX, lastSparkleY = x, y
+            lastSparkleTime = now
+        end
+
+        -- FX fade (todos los entries del pool)
+        for i = 1, #fxPool do
+            local e = fxPool[i]
+            if e.tex:IsShown() then
+                local age = now - e.born
+                if age >= e.lifetime then
+                    e.tex:Hide()
+                else
+                    local p = age / e.lifetime
+                    if e.kind == "trail" then
+                        e.tex:SetAlpha(1 - p)
+                        local sz = e.startSize * (1 - 0.5 * p)
+                        e.tex:SetSize(sz, sz)
+                    else
+                        local sz = e.startSize + (e.endSize - e.startSize) * p
+                        e.tex:SetSize(sz, sz)
+                        e.tex:SetAlpha(1 - p)
+                    end
+                end
+            end
+        end
+
+        -- Cast progress simulation: cycle de 10s = cast 3s -> idle 2s -> channel
+        -- drain 3s -> idle 2s. Demuestra fill clockwise/counter y drain.
+        local cast = s.cast or {}
+        if cast.enabled then
+            local cycle = 10
+            local phase = t % cycle
+            local progress, lit
+            if phase < 3 then
+                progress = phase / 3; lit = true
+            elseif phase < 5 then
+                progress = 0; lit = false
+            elseif phase < 8 then
+                progress = 1 - ((phase - 5) / 3); lit = true
+            else
+                progress = 0; lit = false
+            end
+            if not lit then
+                if lastNumLit > 0 then
+                    for i = 1, NUM_CAST_SEGMENTS do ringF.castSegments[i]:SetAlpha(0) end
+                    lastNumLit = 0
+                end
+            else
+                local castOpacity = cast.opacity or 1
+                local numLit = mathfloor(progress * NUM_CAST_SEGMENTS + 0.5)
+                if numLit ~= lastNumLit then
+                    if numLit > lastNumLit then
+                        for i = lastNumLit + 1, numLit do ringF.castSegments[PreviewWedgeAt(i)]:SetAlpha(castOpacity) end
+                    else
+                        for i = numLit + 1, lastNumLit do ringF.castSegments[PreviewWedgeAt(i)]:SetAlpha(0) end
+                    end
+                    lastNumLit = numLit
+                end
+            end
+        else
+            if lastNumLit > 0 then
+                for i = 1, NUM_CAST_SEGMENTS do ringF.castSegments[i]:SetAlpha(0) end
+                lastNumLit = 0
+            end
+        end
+    end)
+
+    container:HookScript("OnSizeChanged", ApplyAll)
+    container:HookScript("OnShow", ApplyAll)
+    table.insert(previewRegistry, preview)
+
+    C_Timer.After(0, ApplyAll)
+    return preview
+end
+
+NotifyCursorRingPreviews = function()
+    for _, p in ipairs(previewRegistry) do
+        if p.container:IsShown() then p.Refresh() end
+    end
 end
