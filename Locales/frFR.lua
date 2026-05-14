@@ -181,4 +181,26 @@ ns.RegisterLocale("frFR", {
     ["Class"] = "Classe",
     ["Hero"] = "Héros",
     -- "Spec" reste tel quel (terme commun dans le client français).
+
+    -- ===== Changelog / What's New =====
+    ["What's New"] = "Quoi de neuf",
+    ["Got it"] = "Compris",
+    ["Changelog"] = "Journal des modifications",
+    ["View release notes for all versions"] = "Voir les notes de version de toutes les versions",
+
+    -- ===== Release notes 1.4.0 =====
+    ["Drag trinkets or potions from your bags or equipped slots to the input zone — the addon resolves the use-effect spell ID automatically."] =
+        "Glissez bijoux ou potions depuis vos sacs ou emplacements équipés vers la zone de saisie — l'addon résout automatiquement l'ID du sort de l'effet d'utilisation.",
+    ["Per-entry visibility for Cursor Spells and Auras: Always / Only in combat / Only out of combat (independent of the global cursor visibility)."] =
+        "Visibilité par entrée pour les sorts et auras du curseur : Toujours / Uniquement en combat / Uniquement hors combat (indépendante de la visibilité globale du curseur).",
+    ["Per-entry visual overrides for Cursor Spells and Auras: icon size, opacity, and custom position with offset X/Y (the icon detaches from the grid and floats freely)."] =
+        "Surcharges visuelles par entrée pour les sorts et auras du curseur : taille d'icône, opacité, et position personnalisée avec offset X/Y (l'icône se détache de la grille et flotte librement).",
+    ["Tabbed editor modals: Cursor Spell and Cursor Aura split into General / Display / Effects; Ring Aura into General / Effects; Pulse Spell and Pulse Aura into General / Sound."] =
+        "Modales d'édition à onglets : Cursor Spell et Cursor Aura divisés en General / Display / Effects ; Ring Aura en General / Effects ; Pulse Spell et Pulse Aura en General / Sound.",
+    ["Changelog button (?) in the config window title bar — opens this popup with all release notes on demand."] =
+        "Bouton Changelog (?) dans la barre de titre de la fenêtre de configuration — ouvre ce popup avec toutes les notes de version sur demande.",
+    ["Fix: 'Spell not found' when adding via the autocomplete dropdown for spells/auras the character does not know. The autocomplete-resolved spell ID is now preferred over name lookup."] =
+        "Correctif : 'Sort introuvable' lors de l'ajout via le menu d'autocomplétion pour les sorts/auras que le personnage ne connaît pas. L'ID de sort résolu par l'autocomplétion est désormais préféré à la recherche par nom.",
+    ["Fix: creating or switching profiles left some menus showing the old profile's values. Config pages are now rebuilt against the active profile on every switch."] =
+        "Correctif : créer ou changer de profil laissait certains menus avec les valeurs de l'ancien profil. Les pages de configuration sont maintenant reconstruites contre le profil actif à chaque changement.",
 })

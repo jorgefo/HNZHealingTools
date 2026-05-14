@@ -181,4 +181,26 @@ ns.RegisterLocale("ptBR", {
     ["Class"] = "Classe",
     ["Hero"] = "Herói",
     -- "Spec" permanece como está (já comum em pt-BR no contexto do jogo).
+
+    -- ===== Changelog / What's New =====
+    ["What's New"] = "Novidades",
+    ["Got it"] = "Entendi",
+    ["Changelog"] = "Registro de mudanças",
+    ["View release notes for all versions"] = "Ver notas de versão de todas as versões",
+
+    -- ===== Release notes 1.4.0 =====
+    ["Drag trinkets or potions from your bags or equipped slots to the input zone — the addon resolves the use-effect spell ID automatically."] =
+        "Arraste trinkets ou poções da sua bolsa ou slots equipados para a área de entrada — o addon resolve automaticamente o spellID do efeito de uso.",
+    ["Per-entry visibility for Cursor Spells and Auras: Always / Only in combat / Only out of combat (independent of the global cursor visibility)."] =
+        "Visibilidade por entrada para Cursor Spells e Auras: Sempre / Apenas em combate / Apenas fora de combate (independente da visibilidade global do cursor).",
+    ["Per-entry visual overrides for Cursor Spells and Auras: icon size, opacity, and custom position with offset X/Y (the icon detaches from the grid and floats freely)."] =
+        "Sobrescritas visuais por entrada para Cursor Spells e Auras: tamanho do ícone, opacidade e posição personalizada com offset X/Y (o ícone sai do grid e flutua livremente).",
+    ["Tabbed editor modals: Cursor Spell and Cursor Aura split into General / Display / Effects; Ring Aura into General / Effects; Pulse Spell and Pulse Aura into General / Sound."] =
+        "Modais de editor com abas: Cursor Spell e Cursor Aura divididos em General / Display / Effects; Ring Aura em General / Effects; Pulse Spell e Pulse Aura em General / Sound.",
+    ["Changelog button (?) in the config window title bar — opens this popup with all release notes on demand."] =
+        "Botão Changelog (?) na barra de título da janela de configuração — abre este popup com todas as notas de versão sob demanda.",
+    ["Fix: 'Spell not found' when adding via the autocomplete dropdown for spells/auras the character does not know. The autocomplete-resolved spell ID is now preferred over name lookup."] =
+        "Correção: 'Magia não encontrada' ao adicionar via dropdown de autocompletar para magias/auras que o personagem não conhece. O spell ID resolvido pelo autocompletar agora tem prioridade sobre a busca por nome.",
+    ["Fix: creating or switching profiles left some menus showing the old profile's values. Config pages are now rebuilt against the active profile on every switch."] =
+        "Correção: criar ou trocar de perfil deixava alguns menus com os valores do perfil antigo. As páginas de configuração agora são reconstruídas contra o perfil ativo a cada troca.",
 })

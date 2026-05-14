@@ -181,4 +181,26 @@ ns.RegisterLocale("zhCN", {
     ["Class"] = "职业",
     ["Hero"] = "英雄",
     -- "Spec" 保持原样。
+
+    -- ===== Changelog / What's New =====
+    ["What's New"] = "更新内容",
+    ["Got it"] = "知道了",
+    ["Changelog"] = "更新日志",
+    ["View release notes for all versions"] = "查看所有版本的发布说明",
+
+    -- ===== Release notes 1.4.0 =====
+    ["Drag trinkets or potions from your bags or equipped slots to the input zone — the addon resolves the use-effect spell ID automatically."] =
+        "将饰品或药水从背包或装备槽拖到输入区域 — 插件会自动解析使用效果的法术 ID。",
+    ["Per-entry visibility for Cursor Spells and Auras: Always / Only in combat / Only out of combat (independent of the global cursor visibility)."] =
+        "Cursor 法术和光环的逐条可见性：始终 / 仅战斗中 / 仅战斗外（独立于全局光标可见性）。",
+    ["Per-entry visual overrides for Cursor Spells and Auras: icon size, opacity, and custom position with offset X/Y (the icon detaches from the grid and floats freely)."] =
+        "Cursor 法术和光环的逐条视觉覆盖：图标大小、不透明度、以及带偏移 X/Y 的自定义位置（图标会从网格中分离并自由浮动）。",
+    ["Tabbed editor modals: Cursor Spell and Cursor Aura split into General / Display / Effects; Ring Aura into General / Effects; Pulse Spell and Pulse Aura into General / Sound."] =
+        "选项卡式编辑器弹窗：Cursor Spell 和 Cursor Aura 分为 General / Display / Effects；Ring Aura 分为 General / Effects；Pulse Spell 和 Pulse Aura 分为 General / Sound。",
+    ["Changelog button (?) in the config window title bar — opens this popup with all release notes on demand."] =
+        "配置窗口标题栏中的 Changelog (?) 按钮 — 随时打开此弹窗查看所有发布说明。",
+    ["Fix: 'Spell not found' when adding via the autocomplete dropdown for spells/auras the character does not know. The autocomplete-resolved spell ID is now preferred over name lookup."] =
+        "修复：从角色未知的法术/光环的自动完成下拉中添加时显示「未找到法术」。现在优先使用自动完成解析出的法术 ID，而非按名称查找。",
+    ["Fix: creating or switching profiles left some menus showing the old profile's values. Config pages are now rebuilt against the active profile on every switch."] =
+        "修复：创建或切换配置文件时，部分菜单仍显示旧配置文件的值。配置页面现在会在每次切换时根据活动配置文件重新构建。",
 })

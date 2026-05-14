@@ -181,4 +181,26 @@ ns.RegisterLocale("ruRU", {
     ["Class"] = "Класс",
     ["Hero"] = "Герой",
     -- "Spec" остаётся как есть.
+
+    -- ===== Changelog / What's New =====
+    ["What's New"] = "Что нового",
+    ["Got it"] = "Понятно",
+    ["Changelog"] = "Журнал изменений",
+    ["View release notes for all versions"] = "Показать заметки о выпуске всех версий",
+
+    -- ===== Release notes 1.4.0 =====
+    ["Drag trinkets or potions from your bags or equipped slots to the input zone — the addon resolves the use-effect spell ID automatically."] =
+        "Перетащите тринкеты или зелья из сумки или экипированных слотов в зону ввода — аддон автоматически определит ID заклинания эффекта использования.",
+    ["Per-entry visibility for Cursor Spells and Auras: Always / Only in combat / Only out of combat (independent of the global cursor visibility)."] =
+        "Видимость для каждой записи Cursor Spells и Auras: Всегда / Только в бою / Только вне боя (независимо от глобальной видимости курсора).",
+    ["Per-entry visual overrides for Cursor Spells and Auras: icon size, opacity, and custom position with offset X/Y (the icon detaches from the grid and floats freely)."] =
+        "Визуальные переопределения для каждой записи Cursor Spells и Auras: размер иконки, прозрачность и пользовательская позиция со смещением X/Y (иконка открепляется от сетки и располагается свободно).",
+    ["Tabbed editor modals: Cursor Spell and Cursor Aura split into General / Display / Effects; Ring Aura into General / Effects; Pulse Spell and Pulse Aura into General / Sound."] =
+        "Модальные редакторы с вкладками: Cursor Spell и Cursor Aura разделены на General / Display / Effects; Ring Aura на General / Effects; Pulse Spell и Pulse Aura на General / Sound.",
+    ["Changelog button (?) in the config window title bar — opens this popup with all release notes on demand."] =
+        "Кнопка Changelog (?) в заголовке окна настроек — открывает этот попап со всеми заметками о выпуске по требованию.",
+    ["Fix: 'Spell not found' when adding via the autocomplete dropdown for spells/auras the character does not know. The autocomplete-resolved spell ID is now preferred over name lookup."] =
+        "Исправление: 'Заклинание не найдено' при добавлении через автодополнение для заклинаний/аур, которых персонаж не знает. Теперь ID заклинания из автодополнения имеет приоритет над поиском по имени.",
+    ["Fix: creating or switching profiles left some menus showing the old profile's values. Config pages are now rebuilt against the active profile on every switch."] =
+        "Исправление: при создании или смене профиля некоторые меню показывали значения старого профиля. Страницы настроек теперь перестраиваются под активный профиль при каждой смене.",
 })

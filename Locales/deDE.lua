@@ -181,4 +181,26 @@ ns.RegisterLocale("deDE", {
     ["Class"] = "Klasse",
     ["Hero"] = "Heldenklasse",
     -- "Spec" bleibt unverändert (üblich im deutschen Client).
+
+    -- ===== Changelog / What's New =====
+    ["What's New"] = "Neuigkeiten",
+    ["Got it"] = "Verstanden",
+    ["Changelog"] = "Änderungsprotokoll",
+    ["View release notes for all versions"] = "Versionshinweise aller Versionen anzeigen",
+
+    -- ===== Release notes 1.4.0 =====
+    ["Drag trinkets or potions from your bags or equipped slots to the input zone — the addon resolves the use-effect spell ID automatically."] =
+        "Trinkets oder Tränke aus deinen Taschen oder ausgerüsteten Plätzen in die Eingabezone ziehen — das Addon ermittelt automatisch die Zauber-ID des Nutzungseffekts.",
+    ["Per-entry visibility for Cursor Spells and Auras: Always / Only in combat / Only out of combat (independent of the global cursor visibility)."] =
+        "Sichtbarkeit pro Eintrag für Cursor-Zauber und Auren: Immer / Nur im Kampf / Nur außerhalb des Kampfes (unabhängig von der globalen Cursor-Sichtbarkeit).",
+    ["Per-entry visual overrides for Cursor Spells and Auras: icon size, opacity, and custom position with offset X/Y (the icon detaches from the grid and floats freely)."] =
+        "Visuelle Überschreibungen pro Eintrag für Cursor-Zauber und Auren: Symbolgröße, Deckkraft und eigene Position mit Offset X/Y (das Symbol löst sich vom Raster und schwebt frei).",
+    ["Tabbed editor modals: Cursor Spell and Cursor Aura split into General / Display / Effects; Ring Aura into General / Effects; Pulse Spell and Pulse Aura into General / Sound."] =
+        "Editor-Modals mit Tabs: Cursor Spell und Cursor Aura aufgeteilt in General / Display / Effects; Ring Aura in General / Effects; Pulse Spell und Pulse Aura in General / Sound.",
+    ["Changelog button (?) in the config window title bar — opens this popup with all release notes on demand."] =
+        "Changelog-Schaltfläche (?) in der Titelleiste des Konfigurationsfensters — öffnet dieses Popup mit allen Versionshinweisen auf Abruf.",
+    ["Fix: 'Spell not found' when adding via the autocomplete dropdown for spells/auras the character does not know. The autocomplete-resolved spell ID is now preferred over name lookup."] =
+        "Fix: 'Zauber nicht gefunden' beim Hinzufügen über das Autovervollständigungs-Dropdown für Zauber/Auren, die der Charakter nicht kennt. Die vom Autocomplete aufgelöste Zauber-ID wird jetzt der Namenssuche vorgezogen.",
+    ["Fix: creating or switching profiles left some menus showing the old profile's values. Config pages are now rebuilt against the active profile on every switch."] =
+        "Fix: Beim Erstellen oder Wechseln von Profilen zeigten einige Menüs noch Werte des alten Profils. Die Konfigurationsseiten werden nun bei jedem Wechsel gegen das aktive Profil neu aufgebaut.",
 })
