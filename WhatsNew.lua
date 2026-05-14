@@ -14,22 +14,41 @@ local addonName, ns = ...
 -- quedarse en la tabla sin re-mostrar.
 -- ============================================================
 
-local RELEASE_NOTES = {
-    {
-        version = "1.3.0",
-        date = "2026-05-13",
-        items = {
-            "Live preview en el config para Ring, Pulse, Cursor Ring y Cursor Icons — todos los sliders se reflejan en vivo.",
-            "Reordenar entries en Cursor Spells / Auras con flechas arriba/abajo en cada fila.",
-            "Boton Test (T) por entry — fuerza el icono al cursor real durante 5s para previsualizar como se ve.",
-            "Ventana de config redimensionable desde la esquina inferior derecha (tamano se persiste por profile).",
-            "Texturas custom para las flechas de mover (incluidas en el addon, no dependen de built-ins).",
-            "Editor de notas MRT/NSRT: el selector de formato ahora son 2 botones tipo radio (NSRT default).",
-            "Fix: el pulse de MRT/NSRT ahora aparece aunque el Cooldown Pulse tenga visibility distinto a 'always'.",
-            "Este popup de notas que aparece una sola vez al instalar una version nueva.",
+-- Items de cada release se buildean en GetReleaseNotes() (deferred): wrappear
+-- ns.L[...] al top-level no funciona porque este archivo carga antes que los
+-- locale files registren sus tablas. La lookup en GetReleaseNotes() pasa por
+-- la metatable de ns.L y cae al key (ingles) si no hay traduccion.
+local function GetReleaseNotes()
+    return {
+        {
+            version = "1.4.0",
+            date = "2026-05-14",
+            items = {
+                ns.L["Drag trinkets or potions from your bags or equipped slots to the input zone — the addon resolves the use-effect spell ID automatically."],
+                ns.L["Per-entry visibility for Cursor Spells and Auras: Always / Only in combat / Only out of combat (independent of the global cursor visibility)."],
+                ns.L["Per-entry visual overrides for Cursor Spells and Auras: icon size, opacity, and custom position with offset X/Y (the icon detaches from the grid and floats freely)."],
+                ns.L["Tabbed editor modals: Cursor Spell and Cursor Aura split into General / Display / Effects; Ring Aura into General / Effects; Pulse Spell and Pulse Aura into General / Sound."],
+                ns.L["Changelog button (?) in the config window title bar — opens this popup with all release notes on demand."],
+                ns.L["Fix: 'Spell not found' when adding via the autocomplete dropdown for spells/auras the character does not know. The autocomplete-resolved spell ID is now preferred over name lookup."],
+                ns.L["Fix: creating or switching profiles left some menus showing the old profile's values. Config pages are now rebuilt against the active profile on every switch."],
+            },
         },
-    },
-}
+        {
+            version = "1.3.0",
+            date = "2026-05-13",
+            items = {
+                "Live preview en el config para Ring, Pulse, Cursor Ring y Cursor Icons — todos los sliders se reflejan en vivo.",
+                "Reordenar entries en Cursor Spells / Auras con flechas arriba/abajo en cada fila.",
+                "Boton Test (T) por entry — fuerza el icono al cursor real durante 5s para previsualizar como se ve.",
+                "Ventana de config redimensionable desde la esquina inferior derecha (tamano se persiste por profile).",
+                "Texturas custom para las flechas de mover (incluidas en el addon, no dependen de built-ins).",
+                "Editor de notas MRT/NSRT: el selector de formato ahora son 2 botones tipo radio (NSRT default).",
+                "Fix: el pulse de MRT/NSRT ahora aparece aunque el Cooldown Pulse tenga visibility distinto a 'always'.",
+                "Este popup de notas que aparece una sola vez al instalar una version nueva.",
+            },
+        },
+    }
+end
 
 -- Compara strings de version semver-style. Devuelve -1, 0, 1 (a<b, a==b, a>b).
 local function CompareVersions(a, b)
@@ -151,7 +170,7 @@ function ns:ShowWhatsNew()
     -- API publica: fuerza mostrar el popup con TODAS las release notes (para
     -- comando slash o boton manual). No toca lastSeenVersion.
     if not whatsNewFrame then whatsNewFrame = CreateWhatsNewFrame() end
-    BuildContent(whatsNewFrame.content, RELEASE_NOTES)
+    BuildContent(whatsNewFrame.content, GetReleaseNotes())
     whatsNewFrame:Show()
 end
 
@@ -170,16 +189,17 @@ function ns:ShowWhatsNewIfNeeded()
     -- No-op si ya vimos esta version (o una mas nueva).
     if lastSeen and CompareVersions(currentVersion, lastSeen) <= 0 then return end
 
+    local releaseNotes = GetReleaseNotes()
     -- Que notas mostrar:
     --   - Primera instalacion (lastSeen == nil): solo la latest entry.
     --   - Upgrade: todas las versiones entre lastSeen (exclusive) y current (inclusive).
     local toShow = {}
     if not lastSeen then
-        if RELEASE_NOTES[1] and CompareVersions(RELEASE_NOTES[1].version, currentVersion) <= 0 then
-            table.insert(toShow, RELEASE_NOTES[1])
+        if releaseNotes[1] and CompareVersions(releaseNotes[1].version, currentVersion) <= 0 then
+            table.insert(toShow, releaseNotes[1])
         end
     else
-        for _, n in ipairs(RELEASE_NOTES) do
+        for _, n in ipairs(releaseNotes) do
             if CompareVersions(n.version, lastSeen) > 0 and CompareVersions(n.version, currentVersion) <= 0 then
                 table.insert(toShow, n)
             end

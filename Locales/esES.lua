@@ -33,6 +33,24 @@ ns.RegisterLocale("esES", {
     ["Move down"] = "Mover abajo",
     ["What's New"] = "Novedades",
     ["Got it"] = "Entendido",
+    ["Changelog"] = "Registro de cambios",
+    ["View release notes for all versions"] = "Ver notas de versión de todas las versiones",
+
+    -- ===== Release notes 1.4.0 =====
+    ["Drag trinkets or potions from your bags or equipped slots to the input zone — the addon resolves the use-effect spell ID automatically."] =
+        "Arrastra trinkets o pociones desde tu bolsa o slots de equipo a la zona de entrada — el addon resuelve automáticamente el spell ID del use-effect.",
+    ["Per-entry visibility for Cursor Spells and Auras: Always / Only in combat / Only out of combat (independent of the global cursor visibility)."] =
+        "Visibilidad por entrada para Cursor Spells y Auras: Siempre / Solo en combate / Solo fuera de combate (independiente de la visibilidad global del cursor).",
+    ["Per-entry visual overrides for Cursor Spells and Auras: icon size, opacity, and custom position with offset X/Y (the icon detaches from the grid and floats freely)."] =
+        "Overrides visuales por entrada para Cursor Spells y Auras: tamaño del icono, opacidad y posición libre con offset X/Y (el icono se separa del grid y flota libremente).",
+    ["Tabbed editor modals: Cursor Spell and Cursor Aura split into General / Display / Effects; Ring Aura into General / Effects; Pulse Spell and Pulse Aura into General / Sound."] =
+        "Editores con tabs: Cursor Spell y Cursor Aura divididos en General / Display / Effects; Ring Aura en General / Effects; Pulse Spell y Pulse Aura en General / Sound.",
+    ["Changelog button (?) in the config window title bar — opens this popup with all release notes on demand."] =
+        "Botón Changelog (?) en la barra superior de la ventana de config — abre este popup con todas las notas de versión cuando lo necesites.",
+    ["Fix: 'Spell not found' when adding via the autocomplete dropdown for spells/auras the character does not know. The autocomplete-resolved spell ID is now preferred over name lookup."] =
+        "Fix: 'Hechizo no encontrado' al agregar desde el autocomplete para hechizos/auras que el personaje no conoce. Ahora se prefiere el spell ID resuelto por el autocomplete sobre el lookup por nombre.",
+    ["Fix: creating or switching profiles left some menus showing the old profile's values. Config pages are now rebuilt against the active profile on every switch."] =
+        "Fix: al crear o cambiar de perfil, algunos menús quedaban con los valores del perfil anterior. Las páginas de config ahora se reconstruyen contra el perfil activo en cada switch.",
     ["Create"] = "Crear",
     ["Load"] = "Cargar",
     ["Export"] = "Exportar",
@@ -68,6 +86,10 @@ ns.RegisterLocale("esES", {
     ["Unit:"] = "Unidad:",
     ["Type:"] = "Tipo:",
     ["Show:"] = "Mostrar:",
+    ["Visibility:"] = "Visibilidad:",
+    ["Icon size (0=global):"] = "Tamaño icono (0=global):",
+    ["Opacity (0=global, 0.1-1):"] = "Opacidad (0=global, 0.1-1):",
+    ["Custom position"] = "Posición libre",
     ["Min stacks:"] = "Stacks mín.:",
     ["Duration (sec, 0=auto):"] = "Duración (seg, 0=auto):",
     ["Color:"] = "Color:",
@@ -158,6 +180,7 @@ ns.RegisterLocale("esES", {
 
     -- ===== DropZone =====
     ["Drag a spell here"] = "Arrastra un hechizo aquí",
+    ["Drag a spell or item here"] = "Arrastra un hechizo u objeto aquí",
 
     -- ===== Dropdowns: unidades / filtros / showWhen =====
     ["Target"] = "Objetivo",

@@ -6,6 +6,27 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ---
 
+## [1.4.0] — 2026-05-14
+
+### Added
+- **Drag items to the spell input zone**: trinkets, potions y otros items con `Use:` se pueden arrastrar desde la bolsa o slots de equipo a la zona "Drag a spell or item here". El addon resuelve el spellID del use-effect via `C_Item.GetItemSpell` (con fallback a `GetItemSpell` legacy) y lo pasa al callback igual que un drop de spell. Funciona en todos los editors que tienen DropZone (Cursor / Ring / Pulse).
+- **Per-entry visibility para Cursor Spells y Auras**: cada entry tiene su propio gate `visibility` (Always / Only in combat / Only out of combat) independiente del visibility global de `cursorDisplay`. Editado desde el dropdown "Visibilidad" en el tab General de cada editor; filtrado en `CursorDisplay.UpdateData` via `ns.MatchesVisibility(entry.visibility, inCombat)`. Default `"always"` para entries existentes (sin migration). Eventos `PLAYER_REGEN_*` marcan dirty para que la transición sea instantánea (sin esperar el idle-poll de 1Hz).
+- **Per-entry visual overrides para Cursor Spells y Auras**: cada entry puede override del global `iconSize`, `opacity`, y `useCustomPosition` + `offsetX/Y`. Cuando `useCustomPosition=true` el icono se desconecta del grid layout y se ancla al cursor + offset (permite "trinket arriba, healing CDs en grid abajo"). El `displayFrame` se forzó a alpha 1 para que el opacity per-entry sea absoluto y no se multiplique por el global del padre. CursorDisplay.UpdateData ahora separa iconos en buckets grid vs detached para el pass de layout.
+- **Tabs en los editor modals**: Cursor Spell y Cursor Aura divididos en 3 tabs (General / Display / Effects); Ring Aura en 2 (General / Effects); Pulse Spell y Pulse Aura en 2 (General / Sound). Helper nuevo `CreateModalTabs(parent, tabNames)` reutilizable. Reduce el scroll vertical y agrupa controles relacionados.
+- **Botón Changelog (?)** en la barra de título de la ventana de config. Abre el popup `WhatsNew` con todas las release notes en cualquier momento (no solo durante upgrades). Tooltip "Changelog" (localizado).
+- **Release notes localizadas**: los items de cada release ahora pasan por `ns.L[...]`, así que las traducciones en cada locale file aplican. Spanish traducido para 1.4.0; otros locales caen al texto en inglés via la metatable de `ns.L`.
+
+### Changed
+- **Layout de los editors numéricos**: parámetros visuales continuos (icon size, opacity, offset X/Y) usan sliders con label arriba y valor en accent — mismo helper `CreateSlider` que usa la config global. Parámetros con valor numérico específico (min charges, min stacks, duration en segundos, stack text size) usan text input directo. La distinción es: slider cuando el feedback visual del rango aporta, text input cuando el usuario ya sabe qué número quiere ingresar.
+- **Specs y Required talent movidos al tab General** en Cursor Spell y Cursor Aura editors (antes estaban en Effects).
+- **Stack text size layout fix**: cada par label-input ahora va en su propia fila en línea (`label: [input]` mismo y), en lugar del cramped "label en una línea, input + label-siguiente en la línea de abajo".
+
+### Fixed
+- **"Spell not found" al agregar desde el autocomplete**: cuando el usuario seleccionaba una sugerencia del dropdown del autocomplete y apretaba **Add**, el editor llamaba a `Add*Spell/Aura(input)` pasando solo el texto. `GetSpellIDFromInput(name)` falla con hechizos/auras que el personaje no conoce (típico para buffs/debuffs de otras clases o use-effects de items). Ahora los handlers de Save prefieren `ns.GetResolvedSpellID(eb)` que lee el `spellID` cacheado por el OnClick del autocomplete (`eb._satResolvedID`); si existe, se pasa como string numérico al Add* y el path de `tonumber(input)` resuelve el ID directo. Aplicado a Cursor Spell, Cursor Aura, y Ring Aura editors. Pulse editors ya lo hacían.
+- **Crear o cambiar perfil dejaba algunos menús con valores del perfil anterior**: las páginas del config se construían una sola vez al abrir la ventana, y muchos widgets cacheaban upvalues del perfil activo en ese momento (`local cast = ns.db.cursorRing.cast`, `ColorSwatch.ct` con la tabla del color). Al hacer SwitchProfile, `ns.db` se rebindeaba pero esos upvalues seguían apuntando al perfil viejo — el usuario veía y escribía al perfil incorrecto. Refactor: se extrajo el page-build loop en una función `BuildAllPages()` y se agregó `RebuildAllPages()` que orfaniza las páginas viejas, resetea los file-scope locals (spell/aura/mrt/pulse list containers), wipe `allSliders/allCheckboxes`, y vuelve a buildear contra el `ns.db` actual. Llamado desde Load / Copy-to-current / Restore-from-backup.
+
+---
+
 ## [1.3.0] — 2026-05-13
 
 ### Added

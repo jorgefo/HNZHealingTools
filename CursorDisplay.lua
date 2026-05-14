@@ -68,10 +68,21 @@ local function GetOrCreateIcon(index)
 end
 
 local function UpdateIconAppearance(iconFrame, data, entry)
-    local size = ns.db.cursorDisplay.iconSize
+    -- Per-entry override de iconSize: si entry.iconSize > 0, gana sobre el global.
+    -- Para iconos en grid los tamaños custom pueden desbordar la celda (calculada
+    -- con global iconSize); el usuario asume responsabilidad de eso, o usa
+    -- useCustomPosition para sacar el icono del grid.
+    local globalSize = ns.db.cursorDisplay.iconSize
+    local size = (entry and entry.iconSize and entry.iconSize > 0) and entry.iconSize or globalSize
     local fontSize = ns.db.cursorDisplay.fontSize or 12
     local stackFontSize = (entry and entry.stackFontSize and entry.stackFontSize > 0) and entry.stackFontSize or fontSize
     iconFrame:SetSize(size, size)
+    -- Per-entry alpha override. displayFrame se mantiene en alpha 1 (ver
+    -- InitCursorDisplay/RefreshCursorDisplay); cada icono aplica el suyo asi
+    -- override per-entry queda absoluto y no se multiplica por el global.
+    local globalAlpha = ns.db.cursorDisplay.opacity or 1
+    local alpha = (entry and entry.opacity and entry.opacity > 0) and entry.opacity or globalAlpha
+    iconFrame:SetAlpha(alpha)
     iconFrame.icon:SetTexture(data.icon)
 
     local desat = (data.status=="UNUSABLE" or data.status=="MISSING" or data.status=="NO_POWER")
@@ -118,6 +129,11 @@ local function UpdateIconAppearance(iconFrame, data, entry)
         end
     end
     if entry and entry.hideTimer then iconFrame.text:SetText("") end
+    -- Guardamos la entry para que el pass de layout en UpdateData pueda
+    -- distinguir grid vs detached y aplicar offsets per-entry. Tambien
+    -- guardamos `size` ya resuelto para que el layout no lo recalcule.
+    iconFrame._entry = entry
+    iconFrame._renderSize = size
     iconFrame:Show()
 end
 
@@ -132,7 +148,8 @@ local function UpdateData()
     local anyTimer = false
 
     for _, entry in ipairs(db.cursorSpells) do
-        if entry.enabled and ns.IsEntryAllowedForCurrentSpec(entry) and ns.IsEntryAllowedForRequiredTalent(entry) then
+        if entry.enabled and ns.IsEntryAllowedForCurrentSpec(entry) and ns.IsEntryAllowedForRequiredTalent(entry)
+           and ns.MatchesVisibility(entry.visibility, inCombat) then
             local status = ns:GetSpellStatus(entry.spellID)
             if status.cooldownRemaining and status.cooldownRemaining > 0 then anyTimer = true end
             local hide = entry.hideOnCooldown and status.status == "COOLDOWN"
@@ -170,7 +187,8 @@ local function UpdateData()
     end
 
     for _, entry in ipairs(db.cursorAuras) do
-        if entry.enabled and ns.IsEntryAllowedForCurrentSpec(entry) and ns.IsEntryAllowedForRequiredTalent(entry) then
+        if entry.enabled and ns.IsEntryAllowedForCurrentSpec(entry) and ns.IsEntryAllowedForRequiredTalent(entry)
+           and ns.MatchesVisibility(entry.visibility, inCombat) then
             local status = ns:GetAuraStatus(entry.spellID, entry.unit, entry.filter, entry.manualDuration)
             if status.remaining and status.remaining > 0 then anyTimer = true end
             local showWhen = entry.showWhen or "ALWAYS"
@@ -193,19 +211,52 @@ local function UpdateData()
 
     if iconIndex == 0 then displayFrame:SetSize(1,1); return end
 
+    -- Separamos iconos en dos buckets: grid (default) y detached (entry con
+    -- useCustomPosition=true). Los detached se posicionan individualmente con
+    -- entry.offsetX/Y relativos al displayFrame; los grid siguen el layout
+    -- column/row clasico, ignorando los detached para el calculo de size.
     local size = db.cursorDisplay.iconSize
     local spacing = db.cursorDisplay.iconSpacing
     local maxCols = db.cursorDisplay.maxColumns
-    local cols = math.min(iconIndex, maxCols)
-    local rows = math.ceil(iconIndex / maxCols)
-    displayFrame:SetSize(cols*(size+spacing)-spacing, rows*(size+spacing)-spacing)
 
+    local gridCount = 0
     for i = 1, iconIndex do
-        local col = (i-1) % maxCols
-        local row = math.floor((i-1) / maxCols)
         local f = iconPool[i]
+        local e = f._entry
+        if not (e and e.useCustomPosition) then
+            gridCount = gridCount + 1
+        end
+    end
+
+    if gridCount > 0 then
+        local cols = math.min(gridCount, maxCols)
+        local rows = math.ceil(gridCount / maxCols)
+        displayFrame:SetSize(cols*(size+spacing)-spacing, rows*(size+spacing)-spacing)
+    else
+        -- Sin grid icons, el displayFrame solo sirve de anchor para detached.
+        -- Lo dejamos en 1x1 para que GetCursorPosition+anchor BOTTOMLEFT funcione.
+        displayFrame:SetSize(1,1)
+    end
+
+    local gridSlot = 0
+    for i = 1, iconIndex do
+        local f = iconPool[i]
+        local e = f._entry
         f:ClearAllPoints()
-        f:SetPoint("TOPLEFT", displayFrame, "TOPLEFT", col*(size+spacing), -row*(size+spacing))
+        if e and e.useCustomPosition then
+            -- Detached: posicionar relativo al BOTTOMLEFT del displayFrame (que
+            -- esta en la posicion del cursor + global offsets). offsetX/Y son
+            -- additional offsets per-entry. Usamos BOTTOMLEFT-a-BOTTOMLEFT para
+            -- que offset(0,0) ponga el icono exactamente en el cursor.
+            local ox = tonumber(e.offsetX) or 0
+            local oy = tonumber(e.offsetY) or 0
+            f:SetPoint("BOTTOMLEFT", displayFrame, "BOTTOMLEFT", ox, oy)
+        else
+            local col = gridSlot % maxCols
+            local row = math.floor(gridSlot / maxCols)
+            f:SetPoint("TOPLEFT", displayFrame, "TOPLEFT", col*(size+spacing), -row*(size+spacing))
+            gridSlot = gridSlot + 1
+        end
     end
 end
 
@@ -237,7 +288,11 @@ function ns:InitCursorDisplay()
     displayFrame = CreateFrame("Frame","HNZHealingToolsCursorFrame",UIParent)
     displayFrame:SetFrameStrata("TOOLTIP"); displayFrame:SetFrameLevel(100)
     displayFrame:SetSize(1,1); displayFrame:EnableMouse(false)
-    displayFrame:SetAlpha(ns.db.cursorDisplay.opacity)
+    -- displayFrame siempre en alpha 1: el opacity global y per-entry override se
+    -- aplican individualmente a cada icono en UpdateIconAppearance. Sin esto, el
+    -- override per-entry se multiplicaria por el alpha del parent y no podria
+    -- forzar 100% si el global es <1.
+    displayFrame:SetAlpha(1)
 
     -- Anchor inicial via SetPoint (sin ClearAllPoints): los SetPoint sucesivos
     -- en el OnUpdate reemplazan este punto in-place.
@@ -267,6 +322,12 @@ function ns:InitCursorDisplay()
         elseif event == "PLAYER_ENTERING_WORLD" then inCombat = UnitAffectingCombat("player") and true or false
         end
         ApplyCursorVisibility()
+        -- Per-entry visibility (entry.visibility) depende de inCombat. Marcamos
+        -- dirty para que el siguiente tick del OnUpdate corra UpdateData y los
+        -- iconos aparezcan/desaparezcan al instante en la transicion de combate
+        -- (sin esto el idle-poll de 1 Hz introduce hasta 1s de delay).
+        if ns.MarkSpellDirty then ns:MarkSpellDirty() end
+        if ns.MarkAuraDirty then ns:MarkAuraDirty() end
     end)
 
     displayFrame:SetScript("OnUpdate", function(self, elapsed)
@@ -317,9 +378,16 @@ function ns:ToggleCursorDisplay()
 end
 
 function ns:RefreshCursorDisplay()
-    if displayFrame then displayFrame:SetAlpha(ns.db.cursorDisplay.opacity) end
+    -- displayFrame en alpha 1: per-icon alpha (global o entry-override) se aplica
+    -- en UpdateIconAppearance, no aqui.
+    if displayFrame then displayFrame:SetAlpha(1) end
     RefreshHotCaches()
     ApplyCursorVisibility()
+    -- Marcar dirty para forzar UpdateData en el siguiente tick — sin esto cambios
+    -- de iconSize/opacity globales no se reflejan hasta el proximo evento de spell
+    -- o aura.
+    if ns.MarkSpellDirty then ns:MarkSpellDirty() end
+    if ns.MarkAuraDirty then ns:MarkAuraDirty() end
     if ns._notifyCursorDisplayPreviews then ns._notifyCursorDisplayPreviews() end
 end
 
