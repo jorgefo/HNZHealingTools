@@ -203,4 +203,22 @@ ns.RegisterLocale("frFR", {
         "Correctif : 'Sort introuvable' lors de l'ajout via le menu d'autocomplétion pour les sorts/auras que le personnage ne connaît pas. L'ID de sort résolu par l'autocomplétion est désormais préféré à la recherche par nom.",
     ["Fix: creating or switching profiles left some menus showing the old profile's values. Config pages are now rebuilt against the active profile on every switch."] =
         "Correctif : créer ou changer de profil laissait certains menus avec les valeurs de l'ancien profil. Les pages de configuration sont maintenant reconstruites contre le profil actif à chaque changement.",
+
+    -- ===== Release notes 1.5.0 =====
+    ["Track items as cooldowns: trinkets, potions and on-use consumables can now be added to the Cursor or Pulse list. New 'Add Item...' button + drag-and-drop dispatches by type (spell vs item) and opens the right editor."] =
+        "Suivre les objets comme cooldowns : bijoux, potions et consommables à utilisation peuvent maintenant être ajoutés à la liste Cursor ou Pulse. Nouveau bouton 'Add Item...' + glisser-déposer dispatch par type (sort vs objet) et ouvre le bon éditeur.",
+    ["Item editors with full tabs (mirror of the Spell editor): General + Display + Effects for cursor items; General + Sound for pulse items. Visual overrides, hide flags, pulse on ready, sound — all available."] =
+        "Éditeurs d'objets avec onglets complets (miroir de l'éditeur de Sort) : General + Display + Effects pour les objets du curseur ; General + Sound pour les objets du pulse. Overrides visuels, hide flags, pulse au prêt, son — tout disponible.",
+    ["Per-entry instance-type filter on every aura/spell/item editor: restrict tracking to Open World, Delves, PvP (Arena/BG), Raid, Mythic+ and/or Dungeon. Reacts instantly when entering/leaving instances."] =
+        "Filtre par entrée selon le type d'instance dans chaque éditeur d'aura/sort/objet : restreindre le suivi à Monde ouvert, Delves, PvP (Arène/BG), Raid, Mythique+ et/ou Donjon. Réagit instantanément à l'entrée/sortie des instances.",
+    ["Aura detection paths 6 + 7: slot iteration (catches semi-restricted auras Midnight hides from name/ID lookups) + manual trigger workaround (for fully-restricted auras like consumable buffs — configure a trigger spell or item ID and the addon synthesizes the ACTIVE state on cast/use)."] =
+        "Chemins de détection d'aura 6 + 7 : itération des slots (capture les auras semi-restreintes que Midnight cache des lookups par nom/ID) + workaround de déclencheur manuel (pour les auras totalement restreintes comme les buffs de consommables — configure un sort ou un ID d'objet déclencheur et l'addon synthétise l'état ACTIVE au cast/utilisation).",
+    ["New /hht listauras command: prints every active buff/debuff with name + spellID + source + duration. Useful for finding the real spellID of a buff when the guessed one isn't detected."] =
+        "Nouvelle commande /hht listauras : affiche tous les buffs/debuffs actifs avec nom + spellID + source + durée. Utile pour trouver le vrai spellID d'un buff quand celui deviné n'est pas détecté.",
+    ["Config window no longer closes when opening the Spellbook (PlayerSpellsFrame). ESC still closes it via a custom handler that doesn't break other keybinds."] =
+        "La fenêtre de config ne se ferme plus à l'ouverture du Grimoire (PlayerSpellsFrame). ECHAP la ferme toujours via un handler personnalisé qui ne casse pas les autres keybinds.",
+    ["Fix: comparing SecureNumber spellId in slot iteration tainted the addon ('attempt to compare a secret number value'). Wrapped in ToPublic + pcall — fully restricted auras are skipped safely instead of crashing the whole frame."] =
+        "Correctif : comparer un spellId SecureNumber dans l'itération des slots contaminait l'addon ('attempt to compare a secret number value'). Enveloppé dans ToPublic + pcall — les auras totalement restreintes sont skipées en sécurité au lieu de planter tout le frame.",
+    ["Fix: ApplyRingVisibility nil call when a ring test entry expired (forward declaration bug, latent since 1.3.0)."] =
+        "Correctif : appel nil à ApplyRingVisibility lors de l'expiration d'une entrée test du ring (bug de forward declaration, latent depuis 1.3.0).",
 })

@@ -203,4 +203,22 @@ ns.RegisterLocale("zhCN", {
         "修复：从角色未知的法术/光环的自动完成下拉中添加时显示「未找到法术」。现在优先使用自动完成解析出的法术 ID，而非按名称查找。",
     ["Fix: creating or switching profiles left some menus showing the old profile's values. Config pages are now rebuilt against the active profile on every switch."] =
         "修复：创建或切换配置文件时，部分菜单仍显示旧配置文件的值。配置页面现在会在每次切换时根据活动配置文件重新构建。",
+
+    -- ===== Release notes 1.5.0 =====
+    ["Track items as cooldowns: trinkets, potions and on-use consumables can now be added to the Cursor or Pulse list. New 'Add Item...' button + drag-and-drop dispatches by type (spell vs item) and opens the right editor."] =
+        "将物品作为冷却追踪：饰品、药水和触发型消耗品现在可以添加到光标或脉冲列表。新增「Add Item...」按钮 + 拖放按类型（法术 vs 物品）分发并打开正确的编辑器。",
+    ["Item editors with full tabs (mirror of the Spell editor): General + Display + Effects for cursor items; General + Sound for pulse items. Visual overrides, hide flags, pulse on ready, sound — all available."] =
+        "完整选项卡的物品编辑器（法术编辑器的镜像）：光标物品的 General + Display + Effects；脉冲物品的 General + Sound。视觉覆盖、隐藏标志、就绪时脉冲、声音 — 全部可用。",
+    ["Per-entry instance-type filter on every aura/spell/item editor: restrict tracking to Open World, Delves, PvP (Arena/BG), Raid, Mythic+ and/or Dungeon. Reacts instantly when entering/leaving instances."] =
+        "每个光环/法术/物品编辑器都有按条目的副本类型过滤器：将追踪限制为开放世界、地穴、PvP（竞技场/战场）、团队、史诗钥石+和/或地下城。进入/离开副本时立即响应。",
+    ["Aura detection paths 6 + 7: slot iteration (catches semi-restricted auras Midnight hides from name/ID lookups) + manual trigger workaround (for fully-restricted auras like consumable buffs — configure a trigger spell or item ID and the addon synthesizes the ACTIVE state on cast/use)."] =
+        "光环检测路径 6 + 7：slot 迭代（捕获 Midnight 在按名称/ID 查找时隐藏的半受限光环）+ 手动触发器变通方案（用于像消耗品增益这样的完全受限光环 — 配置触发法术或物品 ID，插件在施放/使用时合成 ACTIVE 状态）。",
+    ["New /hht listauras command: prints every active buff/debuff with name + spellID + source + duration. Useful for finding the real spellID of a buff when the guessed one isn't detected."] =
+        "新增 /hht listauras 命令：打印每个活动增益/减益及其名称 + spellID + 来源 + 持续时间。当猜测的 ID 未被检测到时，可用于查找增益的真实 spellID。",
+    ["Config window no longer closes when opening the Spellbook (PlayerSpellsFrame). ESC still closes it via a custom handler that doesn't break other keybinds."] =
+        "配置窗口在打开法术书（PlayerSpellsFrame）时不再关闭。ESC 仍然通过自定义处理程序关闭它，不会破坏其他按键绑定。",
+    ["Fix: comparing SecureNumber spellId in slot iteration tainted the addon ('attempt to compare a secret number value'). Wrapped in ToPublic + pcall — fully restricted auras are skipped safely instead of crashing the whole frame."] =
+        "修复：在 slot 迭代中比较 SecureNumber spellId 污染了插件（'attempt to compare a secret number value'）。包装在 ToPublic + pcall 中 — 完全受限光环被安全跳过，而不是导致整个 frame 崩溃。",
+    ["Fix: ApplyRingVisibility nil call when a ring test entry expired (forward declaration bug, latent since 1.3.0)."] =
+        "修复：环测试条目过期时 ApplyRingVisibility 的 nil 调用（前向声明 bug，自 1.3.0 起潜伏）。",
 })

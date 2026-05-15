@@ -374,4 +374,22 @@ ns.RegisterLocale("esES", {
     ["Class"] = "Clase",
     ["Hero"] = "Héroe",
     -- "Spec" se mantiene igual (palabra ya común en español); si el usuario quiere cambiarla, aquí.
+
+    -- ===== Release notes 1.5.0 =====
+    ["Track items as cooldowns: trinkets, potions and on-use consumables can now be added to the Cursor or Pulse list. New 'Add Item...' button + drag-and-drop dispatches by type (spell vs item) and opens the right editor."] =
+        "Trackear items como cooldowns: trinkets, pociones y consumibles on-use ahora pueden agregarse a la lista Cursor o Pulse. Nuevo botón 'Add Item...' + drag-and-drop despacha por tipo (spell vs item) y abre el editor correcto.",
+    ["Item editors with full tabs (mirror of the Spell editor): General + Display + Effects for cursor items; General + Sound for pulse items. Visual overrides, hide flags, pulse on ready, sound — all available."] =
+        "Editores de items con tabs completos (mirror del editor de Spell): General + Display + Effects para items del cursor; General + Sound para items del pulse. Overrides visuales, hide flags, pulse al estar listo, sonido — todo disponible.",
+    ["Per-entry instance-type filter on every aura/spell/item editor: restrict tracking to Open World, Delves, PvP (Arena/BG), Raid, Mythic+ and/or Dungeon. Reacts instantly when entering/leaving instances."] =
+        "Filtro per-entry por tipo de instancia en cada editor de aura/spell/item: restringe el tracking a Mundo abierto, Delves, PvP (Arena/BG), Banda, Mítica+ y/o Mazmorra. Reacciona al instante al entrar/salir de instancias.",
+    ["Aura detection paths 6 + 7: slot iteration (catches semi-restricted auras Midnight hides from name/ID lookups) + manual trigger workaround (for fully-restricted auras like consumable buffs — configure a trigger spell or item ID and the addon synthesizes the ACTIVE state on cast/use)."] =
+        "Paths 6 + 7 de detección de auras: iteración de slots (atrapa auras semi-restringidas que Midnight oculta a los lookups por nombre/ID) + workaround de manual trigger (para auras fully-restricted como buffs de consumibles — configurás un spell o item disparador y el addon sintetiza el estado ACTIVE al castear/usar).",
+    ["New /hht listauras command: prints every active buff/debuff with name + spellID + source + duration. Useful for finding the real spellID of a buff when the guessed one isn't detected."] =
+        "Nuevo comando /hht listauras: imprime todos los buffs/debuffs activos con nombre + spellID + source + duración. Útil para encontrar el spellID real de un buff cuando el adivinado no se detecta.",
+    ["Config window no longer closes when opening the Spellbook (PlayerSpellsFrame). ESC still closes it via a custom handler that doesn't break other keybinds."] =
+        "La ventana de config ya no se cierra al abrir el Libro de hechizos (PlayerSpellsFrame). ESC sigue cerrándola via un handler propio que no rompe otros keybinds.",
+    ["Fix: comparing SecureNumber spellId in slot iteration tainted the addon ('attempt to compare a secret number value'). Wrapped in ToPublic + pcall — fully restricted auras are skipped safely instead of crashing the whole frame."] =
+        "Fix: comparar spellId SecureNumber en la iteración de slots tainteaba el addon ('attempt to compare a secret number value'). Envuelto en ToPublic + pcall — auras fully-restricted se saltean a salvo en lugar de crashear el frame entero.",
+    ["Fix: ApplyRingVisibility nil call when a ring test entry expired (forward declaration bug, latent since 1.3.0)."] =
+        "Fix: llamada nil a ApplyRingVisibility cuando una entry de test del ring expiraba (bug de forward declaration, latente desde 1.3.0).",
 })

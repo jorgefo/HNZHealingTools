@@ -203,4 +203,22 @@ ns.RegisterLocale("ptBR", {
         "Correção: 'Magia não encontrada' ao adicionar via dropdown de autocompletar para magias/auras que o personagem não conhece. O spell ID resolvido pelo autocompletar agora tem prioridade sobre a busca por nome.",
     ["Fix: creating or switching profiles left some menus showing the old profile's values. Config pages are now rebuilt against the active profile on every switch."] =
         "Correção: criar ou trocar de perfil deixava alguns menus com os valores do perfil antigo. As páginas de configuração agora são reconstruídas contra o perfil ativo a cada troca.",
+
+    -- ===== Release notes 1.5.0 =====
+    ["Track items as cooldowns: trinkets, potions and on-use consumables can now be added to the Cursor or Pulse list. New 'Add Item...' button + drag-and-drop dispatches by type (spell vs item) and opens the right editor."] =
+        "Rastrear itens como cooldowns: berloques, poções e consumíveis de uso agora podem ser adicionados à lista Cursor ou Pulse. Novo botão 'Add Item...' + arrastar-e-soltar despacha por tipo (magia vs item) e abre o editor correto.",
+    ["Item editors with full tabs (mirror of the Spell editor): General + Display + Effects for cursor items; General + Sound for pulse items. Visual overrides, hide flags, pulse on ready, sound — all available."] =
+        "Editores de itens com abas completas (espelho do editor de Magia): General + Display + Effects para itens do cursor; General + Sound para itens do pulse. Overrides visuais, hide flags, pulse ao ficar pronto, som — tudo disponível.",
+    ["Per-entry instance-type filter on every aura/spell/item editor: restrict tracking to Open World, Delves, PvP (Arena/BG), Raid, Mythic+ and/or Dungeon. Reacts instantly when entering/leaving instances."] =
+        "Filtro por entrada de tipo de instância em todo editor de aura/magia/item: restringir o rastreamento a Mundo aberto, Cavernas, PvP (Arena/BG), Banda, Mítica+ e/ou Masmorra. Reage instantaneamente ao entrar/sair de instâncias.",
+    ["Aura detection paths 6 + 7: slot iteration (catches semi-restricted auras Midnight hides from name/ID lookups) + manual trigger workaround (for fully-restricted auras like consumable buffs — configure a trigger spell or item ID and the addon synthesizes the ACTIVE state on cast/use)."] =
+        "Caminhos de detecção de aura 6 + 7: iteração de slots (captura auras semi-restritas que Midnight oculta dos lookups por nome/ID) + workaround de gatilho manual (para auras totalmente restritas como buffs de consumíveis — configure um ID de magia ou item gatilho e o addon sintetiza o estado ACTIVE ao conjurar/usar).",
+    ["New /hht listauras command: prints every active buff/debuff with name + spellID + source + duration. Useful for finding the real spellID of a buff when the guessed one isn't detected."] =
+        "Novo comando /hht listauras: imprime todos os buffs/debuffs ativos com nome + spellID + origem + duração. Útil para encontrar o spellID real de um buff quando o adivinhado não é detectado.",
+    ["Config window no longer closes when opening the Spellbook (PlayerSpellsFrame). ESC still closes it via a custom handler that doesn't break other keybinds."] =
+        "A janela de config não fecha mais ao abrir o Grimório (PlayerSpellsFrame). ESC ainda a fecha via um handler personalizado que não quebra outros keybinds.",
+    ["Fix: comparing SecureNumber spellId in slot iteration tainted the addon ('attempt to compare a secret number value'). Wrapped in ToPublic + pcall — fully restricted auras are skipped safely instead of crashing the whole frame."] =
+        "Correção: comparar spellId SecureNumber na iteração de slots contaminava o addon ('attempt to compare a secret number value'). Envolvido em ToPublic + pcall — auras totalmente restritas são puladas em segurança ao invés de quebrar o frame inteiro.",
+    ["Fix: ApplyRingVisibility nil call when a ring test entry expired (forward declaration bug, latent since 1.3.0)."] =
+        "Correção: chamada nil de ApplyRingVisibility quando uma entrada de teste do ring expirava (bug de forward declaration, latente desde 1.3.0).",
 })

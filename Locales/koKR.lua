@@ -203,4 +203,22 @@ ns.RegisterLocale("koKR", {
         "수정: 캐릭터가 모르는 주문/효과를 자동 완성 드롭다운으로 추가할 때 '주문을 찾을 수 없음' 발생. 이제 이름 조회보다 자동 완성에서 확인된 주문 ID가 우선 적용됩니다.",
     ["Fix: creating or switching profiles left some menus showing the old profile's values. Config pages are now rebuilt against the active profile on every switch."] =
         "수정: 프로필을 생성하거나 변경할 때 일부 메뉴에 이전 프로필 값이 남아 있었습니다. 이제 변경할 때마다 활성 프로필 기준으로 구성 페이지가 다시 빌드됩니다.",
+
+    -- ===== Release notes 1.5.0 =====
+    ["Track items as cooldowns: trinkets, potions and on-use consumables can now be added to the Cursor or Pulse list. New 'Add Item...' button + drag-and-drop dispatches by type (spell vs item) and opens the right editor."] =
+        "아이템을 쿨다운으로 추적: 장신구, 물약, 사용형 소모품을 이제 커서 또는 펄스 목록에 추가할 수 있습니다. 새로운 'Add Item...' 버튼 + 드래그 앤 드롭이 타입(주문 vs 아이템)별로 분기하여 알맞은 편집기를 엽니다.",
+    ["Item editors with full tabs (mirror of the Spell editor): General + Display + Effects for cursor items; General + Sound for pulse items. Visual overrides, hide flags, pulse on ready, sound — all available."] =
+        "전체 탭이 있는 아이템 편집기(주문 편집기의 미러): 커서 아이템은 General + Display + Effects; 펄스 아이템은 General + Sound. 시각적 오버라이드, 숨김 플래그, 준비 시 펄스, 사운드 — 모두 사용 가능.",
+    ["Per-entry instance-type filter on every aura/spell/item editor: restrict tracking to Open World, Delves, PvP (Arena/BG), Raid, Mythic+ and/or Dungeon. Reacts instantly when entering/leaving instances."] =
+        "모든 효과/주문/아이템 편집기에 인스턴스 타입별 필터: 일반 월드, 어둠땅, PvP (투기장/전장), 공격대, 신화+ 및/또는 던전으로 추적을 제한. 인스턴스 입장/퇴장 시 즉시 반응.",
+    ["Aura detection paths 6 + 7: slot iteration (catches semi-restricted auras Midnight hides from name/ID lookups) + manual trigger workaround (for fully-restricted auras like consumable buffs — configure a trigger spell or item ID and the addon synthesizes the ACTIVE state on cast/use)."] =
+        "효과 감지 경로 6 + 7: 슬롯 반복(미드나이트가 이름/ID 조회에서 숨기는 반-제한된 효과 포착) + 수동 트리거 우회(소모품 버프와 같은 완전-제한된 효과용 — 트리거 주문 또는 아이템 ID를 설정하면 시전/사용 시 애드온이 ACTIVE 상태를 합성).",
+    ["New /hht listauras command: prints every active buff/debuff with name + spellID + source + duration. Useful for finding the real spellID of a buff when the guessed one isn't detected."] =
+        "새로운 /hht listauras 명령: 모든 활성 버프/디버프를 이름 + spellID + 출처 + 지속시간과 함께 출력. 추측한 ID가 감지되지 않을 때 버프의 실제 spellID 찾기에 유용.",
+    ["Config window no longer closes when opening the Spellbook (PlayerSpellsFrame). ESC still closes it via a custom handler that doesn't break other keybinds."] =
+        "마법책(PlayerSpellsFrame)을 열 때 더 이상 구성 창이 닫히지 않습니다. ESC는 다른 키바인드를 깨지 않는 사용자 정의 핸들러를 통해 여전히 창을 닫습니다.",
+    ["Fix: comparing SecureNumber spellId in slot iteration tainted the addon ('attempt to compare a secret number value'). Wrapped in ToPublic + pcall — fully restricted auras are skipped safely instead of crashing the whole frame."] =
+        "수정: 슬롯 반복에서 SecureNumber spellId 비교가 애드온을 오염시킴('attempt to compare a secret number value'). ToPublic + pcall로 감쌈 — 완전-제한된 효과는 전체 프레임을 충돌시키는 대신 안전하게 건너뜁니다.",
+    ["Fix: ApplyRingVisibility nil call when a ring test entry expired (forward declaration bug, latent since 1.3.0)."] =
+        "수정: 링 테스트 항목이 만료될 때 ApplyRingVisibility nil 호출(전방 선언 버그, 1.3.0부터 잠복).",
 })

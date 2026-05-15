@@ -203,4 +203,22 @@ ns.RegisterLocale("deDE", {
         "Fix: 'Zauber nicht gefunden' beim Hinzufügen über das Autovervollständigungs-Dropdown für Zauber/Auren, die der Charakter nicht kennt. Die vom Autocomplete aufgelöste Zauber-ID wird jetzt der Namenssuche vorgezogen.",
     ["Fix: creating or switching profiles left some menus showing the old profile's values. Config pages are now rebuilt against the active profile on every switch."] =
         "Fix: Beim Erstellen oder Wechseln von Profilen zeigten einige Menüs noch Werte des alten Profils. Die Konfigurationsseiten werden nun bei jedem Wechsel gegen das aktive Profil neu aufgebaut.",
+
+    -- ===== Release notes 1.5.0 =====
+    ["Track items as cooldowns: trinkets, potions and on-use consumables can now be added to the Cursor or Pulse list. New 'Add Item...' button + drag-and-drop dispatches by type (spell vs item) and opens the right editor."] =
+        "Items als Cooldowns verfolgen: Schmuckstücke, Tränke und on-use-Verbrauchsgüter können jetzt zur Cursor- oder Pulse-Liste hinzugefügt werden. Neue 'Add Item...'-Schaltfläche + Drag-and-Drop verteilt nach Typ (Zauber vs. Item) und öffnet den richtigen Editor.",
+    ["Item editors with full tabs (mirror of the Spell editor): General + Display + Effects for cursor items; General + Sound for pulse items. Visual overrides, hide flags, pulse on ready, sound — all available."] =
+        "Item-Editoren mit vollständigen Tabs (Spiegel des Zauber-Editors): General + Display + Effects für Cursor-Items; General + Sound für Pulse-Items. Visuelle Überschreibungen, Hide-Flags, Pulse bei Bereitschaft, Ton — alles verfügbar.",
+    ["Per-entry instance-type filter on every aura/spell/item editor: restrict tracking to Open World, Delves, PvP (Arena/BG), Raid, Mythic+ and/or Dungeon. Reacts instantly when entering/leaving instances."] =
+        "Filter pro Eintrag nach Instanztyp in jedem Aura-/Zauber-/Item-Editor: Tracking auf Offene Welt, Delves, PvP (Arena/BG), Schlachtzug, Mythisch+ und/oder Dungeon beschränken. Reagiert sofort beim Betreten/Verlassen von Instanzen.",
+    ["Aura detection paths 6 + 7: slot iteration (catches semi-restricted auras Midnight hides from name/ID lookups) + manual trigger workaround (for fully-restricted auras like consumable buffs — configure a trigger spell or item ID and the addon synthesizes the ACTIVE state on cast/use)."] =
+        "Aura-Erkennungspfade 6 + 7: Slot-Iteration (fängt semi-eingeschränkte Auren, die Midnight vor Namen-/ID-Lookups versteckt) + manueller Trigger-Workaround (für vollständig eingeschränkte Auren wie Verbrauchsgüter-Buffs — konfiguriere eine Trigger-Zauber- oder Item-ID und das Addon synthetisiert den ACTIVE-Status beim Wirken/Verwenden).",
+    ["New /hht listauras command: prints every active buff/debuff with name + spellID + source + duration. Useful for finding the real spellID of a buff when the guessed one isn't detected."] =
+        "Neuer /hht listauras Befehl: gibt jeden aktiven Buff/Debuff mit Name + spellID + Quelle + Dauer aus. Nützlich, um die echte spellID eines Buffs zu finden, wenn die geratene nicht erkannt wird.",
+    ["Config window no longer closes when opening the Spellbook (PlayerSpellsFrame). ESC still closes it via a custom handler that doesn't break other keybinds."] =
+        "Konfigurationsfenster schließt sich nicht mehr beim Öffnen des Zauberbuchs (PlayerSpellsFrame). ESC schließt es weiterhin über einen eigenen Handler, der andere Keybinds nicht bricht.",
+    ["Fix: comparing SecureNumber spellId in slot iteration tainted the addon ('attempt to compare a secret number value'). Wrapped in ToPublic + pcall — fully restricted auras are skipped safely instead of crashing the whole frame."] =
+        "Fix: Vergleich von SecureNumber spellId in der Slot-Iteration verunreinigte das Addon ('attempt to compare a secret number value'). In ToPublic + pcall verpackt — vollständig eingeschränkte Auren werden sicher übersprungen, statt den gesamten Frame zum Absturz zu bringen.",
+    ["Fix: ApplyRingVisibility nil call when a ring test entry expired (forward declaration bug, latent since 1.3.0)."] =
+        "Fix: ApplyRingVisibility nil-Aufruf, wenn ein Ring-Test-Eintrag abgelaufen ist (Forward-Declaration-Bug, latent seit 1.3.0).",
 })

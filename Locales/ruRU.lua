@@ -203,4 +203,22 @@ ns.RegisterLocale("ruRU", {
         "Исправление: 'Заклинание не найдено' при добавлении через автодополнение для заклинаний/аур, которых персонаж не знает. Теперь ID заклинания из автодополнения имеет приоритет над поиском по имени.",
     ["Fix: creating or switching profiles left some menus showing the old profile's values. Config pages are now rebuilt against the active profile on every switch."] =
         "Исправление: при создании или смене профиля некоторые меню показывали значения старого профиля. Страницы настроек теперь перестраиваются под активный профиль при каждой смене.",
+
+    -- ===== Release notes 1.5.0 =====
+    ["Track items as cooldowns: trinkets, potions and on-use consumables can now be added to the Cursor or Pulse list. New 'Add Item...' button + drag-and-drop dispatches by type (spell vs item) and opens the right editor."] =
+        "Отслеживание предметов как кулдаунов: безделушки, зелья и расходники с активацией теперь можно добавлять в список Cursor или Pulse. Новая кнопка 'Add Item...' + перетаскивание распределяет по типу (заклинание vs предмет) и открывает нужный редактор.",
+    ["Item editors with full tabs (mirror of the Spell editor): General + Display + Effects for cursor items; General + Sound for pulse items. Visual overrides, hide flags, pulse on ready, sound — all available."] =
+        "Редакторы предметов с полными вкладками (зеркало редактора Заклинаний): General + Display + Effects для предметов курсора; General + Sound для предметов пульса. Визуальные переопределения, флаги скрытия, пульс при готовности, звук — всё доступно.",
+    ["Per-entry instance-type filter on every aura/spell/item editor: restrict tracking to Open World, Delves, PvP (Arena/BG), Raid, Mythic+ and/or Dungeon. Reacts instantly when entering/leaving instances."] =
+        "Фильтр по типу инстанса для каждой записи в любом редакторе ауры/заклинания/предмета: ограничить отслеживание Открытым миром, Делвами, PvP (Арена/Поле боя), Рейдом, Мифик+ и/или Подземельем. Реагирует мгновенно при входе/выходе из инстансов.",
+    ["Aura detection paths 6 + 7: slot iteration (catches semi-restricted auras Midnight hides from name/ID lookups) + manual trigger workaround (for fully-restricted auras like consumable buffs — configure a trigger spell or item ID and the addon synthesizes the ACTIVE state on cast/use)."] =
+        "Пути обнаружения аур 6 + 7: итерация слотов (ловит полу-ограниченные ауры, которые Midnight скрывает от поиска по имени/ID) + ручной триггер обходной (для полностью-ограниченных аур типа баффов расходников — настройте ID заклинания или предмета триггера и аддон синтезирует состояние ACTIVE при касте/использовании).",
+    ["New /hht listauras command: prints every active buff/debuff with name + spellID + source + duration. Useful for finding the real spellID of a buff when the guessed one isn't detected."] =
+        "Новая команда /hht listauras: выводит каждый активный бафф/дебафф с именем + spellID + источником + длительностью. Полезно для нахождения реального spellID баффа, когда угаданный не обнаруживается.",
+    ["Config window no longer closes when opening the Spellbook (PlayerSpellsFrame). ESC still closes it via a custom handler that doesn't break other keybinds."] =
+        "Окно настроек больше не закрывается при открытии Книги заклинаний (PlayerSpellsFrame). ESC по-прежнему закрывает его через собственный обработчик, который не ломает другие назначения клавиш.",
+    ["Fix: comparing SecureNumber spellId in slot iteration tainted the addon ('attempt to compare a secret number value'). Wrapped in ToPublic + pcall — fully restricted auras are skipped safely instead of crashing the whole frame."] =
+        "Исправление: сравнение SecureNumber spellId в итерации слотов заражало аддон ('attempt to compare a secret number value'). Обёрнуто в ToPublic + pcall — полностью-ограниченные ауры безопасно пропускаются вместо краха всего фрейма.",
+    ["Fix: ApplyRingVisibility nil call when a ring test entry expired (forward declaration bug, latent since 1.3.0)."] =
+        "Исправление: nil вызов ApplyRingVisibility при истечении тестовой записи кольца (баг forward declaration, латентный с 1.3.0).",
 })
