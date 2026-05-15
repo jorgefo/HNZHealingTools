@@ -7,8 +7,10 @@ local _, ns = ...
 ns.RegisterLocale("esES", {
     -- ===== Mensajes de error / feedback =====
     ["Spell not found: "] = "Hechizo no encontrado: ",
+    ["Item not found: "] = "Objeto no encontrado: ",
     [" already monitored."] = " ya está monitorizado.",
     ["Enter a name/ID."] = "Introduce un nombre/ID.",
+    ["Enter an item ID, name, or link."] = "Introduce un ID de objeto, nombre o link.",
     ["Enter a name."] = "Introduce un nombre.",
     ["Already exists."] = "Ya existe.",
     ["Created: "] = "Creado: ",
@@ -92,6 +94,10 @@ ns.RegisterLocale("esES", {
     ["Custom position"] = "Posición libre",
     ["Min stacks:"] = "Stacks mín.:",
     ["Duration (sec, 0=auto):"] = "Duración (seg, 0=auto):",
+    ["Some auras (item buffs, restricted effects in Midnight) don't expose their duration via API. If the icon/ring shows but doesn't count down, enter the real duration in seconds here (check Wowhead for the exact value)."] = "Algunas auras (especialmente buffs de items consumibles y efectos 'restricted' en Midnight) no exponen su duración via la API. Si el ring/icono se enciende pero no muestra cuenta atrás, ingresá la duración real aquí en segundos (consultá Wowhead para el valor exacto).",
+    ["Trigger spell:"] = "Spell disparador:",
+    ["Trigger item:"] = "Item disparador:",
+    ["Workaround for fully-restricted auras: when the trigger spell is cast OR the trigger item is used, the aura is treated as ACTIVE for the manual duration above. Use only when the standard detection paths fail (verify with /hht auradebug)."] = "Workaround para auras 'fully restricted': cuando se castea el spell disparador O se usa el item disparador, el aura se trata como ACTIVA durante la duración manual indicada arriba. Usar solo cuando los paths de detección estándar fallan (verificá con /hht auradebug).",
     ["Color:"] = "Color:",
     ["Show icon on ring"] = "Mostrar icono en el anillo",
     ["Play sound on activation"] = "Sonar al activarse",
@@ -218,6 +224,24 @@ ns.RegisterLocale("esES", {
     ["Add Cursor Aura..."] = "Añadir aura de cursor...",
     ["Add Ring Aura..."] = "Añadir aura de anillo...",
     ["or drag a spell here:"] = "o arrastra un hechizo aquí:",
+    ["or drag a spell/item here:"] = "o arrastra un hechizo/objeto aquí:",
+    ["Drag a spell or item here"] = "Arrastra un hechizo u objeto aquí",
+    ["Add Item..."] = "Añadir Objeto...",
+    ["Cursor Item"] = "Objeto del cursor",
+    ["Pulse Item"] = "Objeto de pulso",
+    ["Item ID, name, or link:"] = "ID de objeto, nombre o link:",
+    ["Tip: drag the item from your bag/equipment slot directly into the page to auto-fill."] = "Tip: arrastra el objeto desde la mochila/slot de equipo directamente a la página para autocompletar.",
+    ["Item"] = "Objeto",
+    ["ItemID:"] = "ItemID:",
+
+    -- ===== Filtro por tipo de instancia =====
+    ["Show only in:"] = "Mostrar solo en:",
+    ["Open World"] = "Mundo abierto",
+    ["Delves"] = "Delves",
+    ["PvP (Arena/BG)"] = "PvP (Arena/BG)",
+    ["Raid"] = "Banda",
+    ["Mythic+"] = "Mítica+",
+    ["Dungeon"] = "Mazmorra",
 
     -- ===== Cursor Settings page =====
     ["Cursor Display Settings"] = "Ajustes del display del cursor",

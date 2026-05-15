@@ -438,8 +438,150 @@ local function FindAuraBySpellID(unit, spellID, filter)
             end
         end
     end
+    -- 6. Slot-iteration fallback: en Midnight algunos auras (especialmente buffs
+    -- de items consumibles) son visibles en GetAuraSlots pero suprimidos por
+    -- todos los lookups por-ID/nombre. Iteramos los slots manualmente y
+    -- matcheamos por spellId. Mas caro que un lookup directo (O(n) sobre todos
+    -- los buffs/debuffs del unit) pero solo se llega aqui cuando los 5 paths
+    -- anteriores fallaron, asi que el costo es acotado.
+    --
+    -- IMPORTANTE: data.spellId puede ser un SecureNumber para auras
+    -- restringidas. Comparar SecureNumber con == taintea la ejecucion del addon
+    -- de inmediato ("attempt to compare field 'spellId' (a secret number
+    -- value)"). ToPublic envuelve la conversion en pcall y devuelve nil cuando
+    -- el SecureNumber no es recuperable; ese aura simplemente queda fuera de
+    -- match (no podemos saber si es el que buscamos sin tocar el secret value).
+    if C_UnitAuras and C_UnitAuras.GetAuraSlots and C_UnitAuras.GetAuraDataBySlot then
+        -- Dedupe filter: si filter es HELPFUL/HARMFUL, no lo iteramos dos veces.
+        local filtersToScan
+        if filter == "HELPFUL" or filter == "HARMFUL" then
+            filtersToScan = { "HELPFUL", "HARMFUL" }
+        else
+            filtersToScan = { filter, "HELPFUL", "HARMFUL" }
+        end
+        for _, f in ipairs(filtersToScan) do
+            local cont
+            repeat
+                local slots = { C_UnitAuras.GetAuraSlots(unit, f, 50, cont) }
+                cont = slots[1]
+                for i = 2, #slots do
+                    local data = C_UnitAuras.GetAuraDataBySlot(unit, slots[i])
+                    if data then
+                        local sid = ns.ToPublic(data.spellId) or ns.ToPublic(data.spellID)
+                        if sid and sid == spellID then
+                            return data
+                        end
+                    end
+                end
+            until not cont
+        end
+    end
     return nil
 end
+
+-- ============================================================
+-- Manual trigger fallback (para auras "fully restricted" en Midnight)
+-- ============================================================
+-- Algunos buffs (items consumibles, efectos restringidos) no se pueden detectar
+-- por ningun path: GetPlayerAuraBySpellID/GetAuraDataBySpellName/FindAuraByName
+-- los ocultan, CLEU los suprime, GetAuraSlots devuelve los slots pero con
+-- spellId como SecureNumber (intocable). Para esos casos exponemos un workaround:
+-- el usuario configura `entry.manualTriggerSpellID` o `entry.manualTriggerItemID`
+-- en el editor del aura, y nosotros disparamos status=ACTIVE manualmente al
+-- detectar el cast/uso del trigger. La duracion se toma de entry.manualDuration
+-- (que ya existe). Sin manualDuration no hay forma de saber cuando expira, asi
+-- que el modo manual requiere ese campo seteado.
+
+-- Estado: appliedAt timestamp por (unit, spellID). El consumer en GetAuraStatus
+-- compara contra GetTime() para decidir si el aura sigue "activa" segun el
+-- workaround. Se sobreescribe en cada nuevo trigger.
+local manualTriggerActiveSince = {}
+
+local function MarkManualTrigger(unit, spellID)
+    if not (unit and spellID) then return end
+    manualTriggerActiveSince[unit] = manualTriggerActiveSince[unit] or {}
+    manualTriggerActiveSince[unit][spellID] = GetTime()
+    ns:MarkAuraDirty()
+end
+
+local function GetManualTriggerSince(unit, spellID)
+    local u = manualTriggerActiveSince[unit]
+    return u and u[spellID]
+end
+ns._GetManualTriggerSince = GetManualTriggerSince
+
+-- Iterar las listas y disparar para entries cuyo trigger coincide.
+-- `kind` = "item" o "spell"; `id` = itemID o spellID disparador.
+--
+-- Reverse lookup item→use-effect-spell: cuando el cast viene por UNIT_SPELLCAST_SUCCEEDED
+-- (action bar, /use, macros), recibimos el spellID del use-effect, pero el usuario
+-- pudo haber configurado solo manualTriggerItemID. Para que ese caso funcione,
+-- iteramos los items configurados y comparamos su use-effect spell. Asi una sola
+-- config (Item disparador=N) cubre las dos formas de activar el item: hooks de
+-- bag/inventory directos y casts via action bar.
+local function FireManualTriggerByID(kind, id)
+    if not (kind and id and ns.db) then return end
+    local function check(list)
+        for _, e in ipairs(list or {}) do
+            local match = false
+            if kind == "item" and e.manualTriggerItemID == id then
+                match = true
+            elseif kind == "spell" then
+                if e.manualTriggerSpellID == id then
+                    match = true
+                elseif e.manualTriggerItemID and C_Item and C_Item.GetItemSpell then
+                    -- Reverse: este spellID podria ser el use-effect del item configurado
+                    local _, useSpellID = C_Item.GetItemSpell(e.manualTriggerItemID)
+                    if useSpellID == id then match = true end
+                end
+            end
+            if match and e.spellID then
+                MarkManualTrigger(e.unit or "player", e.spellID)
+            end
+        end
+    end
+    check(ns.db.cursorAuras)
+    check(ns.db.ringAuras)
+end
+
+-- Resuelve el itemID disparado por UseInventoryItem/UseContainerItem y dispara.
+local function HandleItemUse(itemID)
+    if not itemID then return end
+    FireManualTriggerByID("item", itemID)
+    -- Tambien: si el item tiene use-effect spell, dispara por spellID. Esto cubre
+    -- el caso del usuario que pone manualTriggerSpellID en lugar de itemID.
+    if C_Item and C_Item.GetItemSpell then
+        local _, sid = C_Item.GetItemSpell(itemID)
+        if sid then FireManualTriggerByID("spell", sid) end
+    end
+end
+
+-- Hooks defensivos: no todas las versiones del cliente exponen las mismas
+-- variantes del API de uso de items. Cubrimos las 3 mas comunes.
+local function InstallManualTriggerHooks()
+    if rawget(_G, "UseInventoryItem") then
+        hooksecurefunc("UseInventoryItem", function(slot)
+            if not slot then return end
+            local itemID = GetInventoryItemID and GetInventoryItemID("player", slot)
+            HandleItemUse(itemID)
+        end)
+    end
+    if rawget(_G, "UseContainerItem") then
+        hooksecurefunc("UseContainerItem", function(bag, slot)
+            if not (bag and slot) then return end
+            local itemID = C_Container and C_Container.GetContainerItemID and C_Container.GetContainerItemID(bag, slot)
+            HandleItemUse(itemID)
+        end)
+    end
+    if C_Container and type(C_Container.UseContainerItem) == "function" then
+        hooksecurefunc(C_Container, "UseContainerItem", function(bag, slot)
+            if not (bag and slot) then return end
+            local itemID = C_Container.GetContainerItemID and C_Container.GetContainerItemID(bag, slot)
+            HandleItemUse(itemID)
+        end)
+    end
+end
+ns._InstallManualTriggerHooks = InstallManualTriggerHooks
 
 local function HandleCleu()
     local _, subEvent, _, _, _, _, _, destGUID, _, _, _, spellID, _, _, _, _, _, amount = CombatLogGetCurrentEventInfo()
@@ -503,6 +645,14 @@ function ns:InitAuraMonitor()
     pcall(monitorFrame.RegisterEvent, monitorFrame, "PLAYER_SPECIALIZATION_CHANGED")
     pcall(monitorFrame.RegisterEvent, monitorFrame, "ACTIVE_TALENT_GROUP_CHANGED")
     pcall(monitorFrame.RegisterEvent, monitorFrame, "COOLDOWN_VIEWER_TABLE_HOTFIXED")
+    -- UNIT_SPELLCAST_SUCCEEDED para player: triggerea el manual fallback cuando
+    -- el cast de un spell configurado como manualTriggerSpellID se completa.
+    -- RegisterUnitEvent (no RegisterEvent) para no contaminar party/raid units.
+    pcall(monitorFrame.RegisterUnitEvent, monitorFrame, "UNIT_SPELLCAST_SUCCEEDED", "player")
+    -- Hooks para uso de items (UseInventoryItem para slots equipados, UseContainerItem
+    -- para slots de bolsa). Disparan manualTriggerItemID + auto-resuelven al
+    -- spellID del use-effect via C_Item.GetItemSpell.
+    InstallManualTriggerHooks()
 
     -- Periodic re-scan: keeps cache fresh and hooks new CDM frames as they're created.
     local scanElapsed = 0
@@ -516,7 +666,8 @@ function ns:InitAuraMonitor()
     end)
     -- Initial scan
     C_Timer.After(1, ScanCdmViewers)
-    monitorFrame:SetScript("OnEvent", function(self, event, unit, updateInfo)
+    monitorFrame:SetScript("OnEvent", function(self, event, ...)
+        local unit, updateInfo = ...
         if event == "UNIT_AURA" then
             if not unit then return end
             -- Skip units we don't track (huge perf win in raids: filters out raidN, partyN, nameplate*, etc.)
@@ -555,6 +706,13 @@ function ns:InitAuraMonitor()
                 wipe(cleuAuras)
                 ns:MarkAuraDirty()
             end
+        elseif event == "UNIT_SPELLCAST_SUCCEEDED" then
+            -- Args desempaquetados: castUnit, castGUID, spellID. Filtramos a
+            -- player porque RegisterUnitEvent ya lo hace, pero es defensivo.
+            local castUnit, _, spellID = ...
+            if castUnit == "player" and type(spellID) == "number" then
+                FireManualTriggerByID("spell", spellID)
+            end
         elseif event == "PLAYER_REGEN_DISABLED" or event == "PLAYER_REGEN_ENABLED" then
             -- One last scan when combat state changes
             FullScanAll()
@@ -582,6 +740,65 @@ function ns:InitAuraMonitor()
             cdmEligibleBuilt = false
         end
     end)
+end
+
+-- Lista todas las auras activas en `unit` (default player) con su nombre +
+-- spellID + source. Util cuando un item aplica un buff con spellID distinto al
+-- que parece (cadena use-spell -> wrapper -> aura final): el usuario activa el
+-- item, corre /hht listauras, y busca el nombre en la salida para sacar el ID
+-- correcto del buff que realmente aparece en el unit.
+function ns:ListAuras(args)
+    local unit = (args and args:match("(%S+)")) or "player"
+    if not UnitExists(unit) then print("|cffff0000HNZ:|r unit '"..unit.."' no existe"); return end
+    print(string.format("|cff00ff00HNZ aura list|r unit=%s", unit))
+    local found = 0
+    -- Path preferido: GetAuraSlots + GetAuraDataBySlot. Devuelve siempre el
+    -- AuraData table (no valores desempaquetados como ForEachAura sin
+    -- usePackedAura=true), asi tenemos acceso confiable a spellId/name/source.
+    if C_UnitAuras and C_UnitAuras.GetAuraSlots and C_UnitAuras.GetAuraDataBySlot then
+        for _, filter in ipairs({"HELPFUL", "HARMFUL"}) do
+            local cont = nil
+            repeat
+                local slots = { C_UnitAuras.GetAuraSlots(unit, filter, 50, cont) }
+                cont = slots[1]
+                for i = 2, #slots do
+                    local data = C_UnitAuras.GetAuraDataBySlot(unit, slots[i])
+                    if data then
+                        local sid = data.spellId or data.spellID
+                        local name = data.name or "?"
+                        local src = data.sourceUnit or "?"
+                        local dur = ns.ToPublic(data.duration) or 0
+                        local exp = ns.ToPublic(data.expirationTime) or 0
+                        local rem = (exp > 0) and (exp - GetTime()) or 0
+                        print(string.format("  [%s] %s |cff888888id=%s|r src=%s dur=%.1fs rem=%.1fs",
+                            filter, tostring(name), tostring(sid), tostring(src), dur, rem))
+                        found = found + 1
+                    end
+                end
+            until not cont
+        end
+    elseif AuraUtil and AuraUtil.ForEachAura then
+        -- Fallback con la firma correcta: usePackedAura=true (5to argumento) para
+        -- recibir el AuraData table en vez de los valores desempaquetados.
+        for _, filter in ipairs({"HELPFUL", "HARMFUL"}) do
+            AuraUtil.ForEachAura(unit, filter, nil, function(auraData)
+                if not auraData then return end
+                local sid = auraData.spellId or auraData.spellID
+                local name = auraData.name or "?"
+                local src = auraData.sourceUnit or "?"
+                local dur = ns.ToPublic(auraData.duration) or 0
+                local exp = ns.ToPublic(auraData.expirationTime) or 0
+                local rem = (exp > 0) and (exp - GetTime()) or 0
+                print(string.format("  [%s] %s |cff888888id=%s|r src=%s dur=%.1fs rem=%.1fs",
+                    filter, tostring(name), tostring(sid), tostring(src), dur, rem))
+                found = found + 1
+            end, true)
+        end
+    end
+    print(string.format("|cff00ff00HNZ:|r %d auras encontradas", found))
+    if found == 0 then
+        print("  |cffff8800Nota:|r las 'restricted/secret auras' (algunos buffs de items en Midnight) NO aparecen aqui — solo via Cooldown Manager hook.")
+    end
 end
 
 function ns:DebugAura(args)
@@ -620,9 +837,53 @@ function ns:DebugAura(args)
     print(string.format("  CDM: hookedFrames=%d  matchingEntries=%d  cooldownViewerEnabled=%s",
         hooked, cdmHits,
         tostring(C_CVar and C_CVar.GetCVarBool and C_CVar.GetCVarBool("cooldownViewerEnabled") or "?")))
+    -- Eligibilidad: si el aura no esta en cdmEligibleSpellIDs, ni siquiera el
+    -- Cooldown Manager de Blizzard puede mostrarla — y nuestro hook depende de
+    -- que CDM la muestre para capturarla. Si esta en eligible pero no en
+    -- configured, el usuario solo tiene que añadirla al viewer correspondiente.
+    if not cdmEligibleBuilt then BuildCdmEligibleCache() end
+    local eligible = cdmEligibleSpellIDs[spellID] and true or false
+    local configured = cdmConfiguredSpellIDs[spellID] and true or false
+    print(string.format("  CDM eligibility: eligible=%s  configured=%s",
+        tostring(eligible), tostring(configured)))
+    if not eligible then
+        print("  |cffff8800Hint:|r el spellID no esta en ninguna categoria de CDM. Ni Blizzard ni el addon pueden trackear este aura. Verifica que sea el ID correcto (puede ser otro distinto al que aplica el item).")
+    elseif not configured then
+        print("  |cff00ccffHint:|r el spellID es elegible para CDM pero no esta agregado a ningun viewer. Añadelo en Edit Mode → Cooldown Manager (BuffIcon o BuffBar para buffs propios) y el addon lo trackeara automaticamente.")
+    end
+    -- Estado del manual trigger: el sexto path final de GetAuraStatus, no parte
+    -- de FindAuraBySpellID. Lo reportamos siempre porque es la red de seguridad
+    -- para fully-restricted auras donde los 6 paths de deteccion no pueden matchear.
+    local manualEntry
+    for _, e in ipairs(ns.db.cursorAuras or {}) do
+        if e.spellID == spellID and e.unit == unit then manualEntry = e; break end
+    end
+    if not manualEntry then
+        for _, e in ipairs(ns.db.ringAuras or {}) do
+            if e.spellID == spellID and e.unit == unit then manualEntry = e; break end
+        end
+    end
+    if manualEntry then
+        local triggerSince = ns._GetManualTriggerSince and ns._GetManualTriggerSince(unit, spellID)
+        local age = triggerSince and (GetTime() - triggerSince) or nil
+        print(string.format("  Manual trigger: spell=%s item=%s manualDuration=%s",
+            tostring(manualEntry.manualTriggerSpellID or "nil"),
+            tostring(manualEntry.manualTriggerItemID or "nil"),
+            tostring(manualEntry.manualDuration or 0)))
+        if triggerSince then
+            print(string.format("  Manual trigger fired %.1fs ago (sintetiza ACTIVE si age < manualDuration)", age))
+        else
+            print("  Manual trigger no se ha disparado aun (no se detecto cast/uso del trigger)")
+        end
+    end
+
     local auraData = FindAuraBySpellID(unit, spellID, filter)
     if not auraData then
-        print("  |cffff8800Aura no encontrada.|r Si está visible en el juego, espera a que se reaplique (cache se llena con UNIT_AURA addedAuras).")
+        print("  |cffff8800FindAuraBySpellID:|r nil (los 6 paths de deteccion fallaron). Si la aura SI esta visible en el buff bar de Blizzard, es 'fully restricted' — solo el manual trigger puede sintetizarla. Configura Item/Spell disparador en el editor.")
+        -- Igual corremos GetAuraStatus para reportar si el manual trigger sintetiza ACTIVE.
+        local statusFinal = ns:GetAuraStatus(spellID, unit, filter, manualEntry and manualEntry.manualDuration or nil)
+        print(string.format("  |cffffcc00RESULT (con manual trigger):|r status=%s remaining=%.2f duration=%.2f",
+            statusFinal.status, statusFinal.remaining or 0, statusFinal.duration or 0))
         return
     end
     local function secretStr(v) if isSecretFn and isSecretFn(v) then return "SECRET" else return tostring(v) end end
@@ -780,6 +1041,24 @@ function ns:GetAuraStatus(spellID, unit, filter, manualDuration)
             result.remaining = cleu.remaining or 0
             if cleu.duration and cleu.duration > 0 then
                 result.expirationTime = GetTime() + cleu.remaining
+            end
+        end
+    end
+
+    -- Manual trigger fallback: ultima oportunidad para auras "fully restricted"
+    -- en Midnight (item buffs, efectos secret) que ningun path detecta. Si el
+    -- usuario configuro un trigger spell/item en el editor y manualDuration > 0,
+    -- usamos el timestamp del ultimo cast/uso del trigger para sintetizar el
+    -- estado ACTIVE. Solo entra cuando MISSING (no pisa una deteccion real).
+    if result.status == "MISSING" and manualDuration and manualDuration > 0 then
+        local since = GetManualTriggerSince(unit, spellID)
+        if since then
+            local elapsed = GetTime() - since
+            if elapsed >= 0 and elapsed < manualDuration then
+                result.status = "ACTIVE"
+                result.duration = manualDuration
+                result.remaining = manualDuration - elapsed
+                result.expirationTime = since + manualDuration
             end
         end
     end

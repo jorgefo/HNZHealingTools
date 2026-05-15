@@ -98,18 +98,21 @@ Search for **HNZ Healing Tools** and install — the client handles updates auto
 | `/hht minimap` | Show / hide the minimap button |
 | `/hht status` | Print status of all tracked spells and auras |
 | `/hht debug <spellID>` | Diagnostic info for a tracked spell |
-| `/hht auradebug <spellID> [unit] [filter]` | Diagnostic info for a tracked aura |
+| `/hht auradebug <spellID> [unit] [filter]` | Diagnostic info for a tracked aura (includes manual trigger state and CDM eligibility) |
+| `/hht listauras [unit]` | List every active buff/debuff on the unit with name + spellID + source + duration |
 | `/hht cdm` | Dump Blizzard Cooldown Manager state |
 
 ### Adding entries
 
 Open `/hht` and pick a tab. Click **Add**, type the spell name or ID (autocomplete will help), pick the unit / filter / show mode, and you're done.
 
-- **Cursor Spells** — spells whose cooldown / charges you want to see near the cursor.
+- **Cursor Spells** — spells (or items via the **Add Item...** button) whose cooldown / charges you want to see near the cursor. Drag-and-drop a spell or item from the spellbook / bag / equipment slot to auto-fill the input.
 - **Cursor Auras** — auras you want to see near the cursor.
-- **Ring Auras** — auras shown as a colored ring around your character.
-- **Pulse Spells / Auras** — entries that trigger a one-shot central icon flash.
+- **Ring Auras** — auras shown as a colored ring around your character. For *fully restricted* auras (some Midnight item buffs hidden from the public API), set **Trigger spell** or **Trigger item** + **Duration** in the editor — the addon synthesizes the ACTIVE state on cast/use.
+- **Pulse Spells / Auras** — entries that trigger a one-shot central icon flash. Items supported via the **Add Item...** button.
 - **MRT / NSRT → Encounters** — import a raid note (paste the text, optionally set difficulty filter), and the timeline reminder fires during `ENCOUNTER_START`.
+
+Every entry editor exposes a **Show only in:** filter (Open World / Delves / PvP / Raid / Mythic+ / Dungeon) so you can scope tracking to specific content. Empty selection = no restriction.
 
 The **Config** sub-tabs in each module control sizes, offsets, opacity, anchors (draggable in-game where applicable), and integrations.
 

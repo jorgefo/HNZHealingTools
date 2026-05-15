@@ -140,6 +140,86 @@ function ns.IsEntryAllowedForRequiredTalent(entry)
     return false
 end
 
+-- ============================================================
+-- Instance-type detection (world / delve / pvp / raid / m+ / dungeon)
+-- ============================================================
+-- Categorias estables para gating per-entry. Las entries opcionalmente guardan
+-- entry.instanceTypes = {"raid","mythicplus"} (lista de strings); nil/empty
+-- significa "siempre" (sin restriccion).
+ns.INSTANCE_TYPES = { "world", "delve", "pvp", "raid", "mythicplus", "dungeon" }
+
+local _instanceCache = nil  -- string ("world", etc.) o nil = stale
+function ns.InvalidateInstanceCache()
+    _instanceCache = nil
+    if ns.MarkSpellDirty then ns:MarkSpellDirty() end
+    if ns.MarkAuraDirty then ns:MarkAuraDirty() end
+end
+
+-- Mapeo de instanceType de Blizzard a nuestras categorias. Diferenciamos:
+--   * "party" + ChallengeMode activo  → "mythicplus"
+--   * "party" sin ChallengeMode       → "dungeon"
+--   * "scenario" + IsDelveInProgress  → "delve"
+--   * "pvp" o "arena"                 → "pvp" (combinados — el usuario los pidio juntos)
+--   * "none" (no instanceada)         → "world"
+function ns.GetCurrentInstanceType()
+    if _instanceCache then return _instanceCache end
+    local inInstance, instanceType = false, "none"
+    if IsInInstance then inInstance, instanceType = IsInInstance() end
+    local result
+    if not inInstance then
+        result = "world"
+    elseif instanceType == "raid" then
+        result = "raid"
+    elseif instanceType == "pvp" or instanceType == "arena" then
+        result = "pvp"
+    elseif instanceType == "party" then
+        local isM = false
+        if C_ChallengeMode and C_ChallengeMode.IsChallengeModeActive then
+            local ok, v = pcall(C_ChallengeMode.IsChallengeModeActive); if ok and v then isM = true end
+        end
+        result = isM and "mythicplus" or "dungeon"
+    elseif instanceType == "scenario" then
+        local isDelve = false
+        if C_PartyInfo and C_PartyInfo.IsDelveInProgress then
+            local ok, v = pcall(C_PartyInfo.IsDelveInProgress); if ok and v then isDelve = true end
+        end
+        if not isDelve and GetInstanceInfo then
+            -- Fallback por difficultyID: delves usan IDs 208 (Story), 216
+            -- (Normal Bountiful), 220+ (Bountiful T1..T11). Pre-Midnight el
+            -- C_PartyInfo helper no existe; en ese caso el rango cubre el caso comun.
+            local ok, _, _, difficultyID = pcall(GetInstanceInfo)
+            if ok and difficultyID and (difficultyID == 208 or difficultyID == 216 or (difficultyID >= 220 and difficultyID <= 231)) then
+                isDelve = true
+            end
+        end
+        result = isDelve and "delve" or "world"
+    else
+        result = "world"
+    end
+    _instanceCache = result
+    return result
+end
+
+function ns.IsEntryAllowedForCurrentInstance(entry)
+    if not (entry and entry.instanceTypes and #entry.instanceTypes > 0) then return true end
+    local cur = ns.GetCurrentInstanceType()
+    for _, t in ipairs(entry.instanceTypes) do
+        if t == cur then return true end
+    end
+    return false
+end
+
+-- Frame dedicado para invalidar el cache. Registrado en load-time del archivo
+-- — los handlers protegen llamadas a ns:MarkSpellDirty (definido en Core.lua,
+-- carga despues) con el `if ns.MarkSpellDirty then` dentro de InvalidateInstanceCache.
+local _instanceFrame = CreateFrame("Frame")
+_instanceFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+_instanceFrame:RegisterEvent("CHALLENGE_MODE_START")
+_instanceFrame:RegisterEvent("CHALLENGE_MODE_COMPLETED")
+_instanceFrame:RegisterEvent("CHALLENGE_MODE_RESET")
+_instanceFrame:RegisterEvent("ZONE_CHANGED_NEW_AREA")
+_instanceFrame:SetScript("OnEvent", function() ns.InvalidateInstanceCache() end)
+
 -- Enumerate every spell reachable from the player's active talent loadout
 -- (class tree, spec tree, hero subtrees). Returns a list of {spellID, name, icon, tree}
 -- sorted alphabetically by name. Each spellID appears once even if it has
@@ -306,6 +386,88 @@ function ns.GetSpellIDFromInput(input)
     local info = C_Spell.GetSpellInfo(input)
     if info then return info.spellID, info.name, info.iconID end
     return nil
+end
+
+-- ============================================================
+-- Item helpers (trinkets / use-on-demand consumibles)
+-- ============================================================
+-- Las entries de cursorSpells/pulseSpells pueden tener `itemID` en lugar de
+-- `spellID`. Discriminador: `entry.itemID and entry.itemID > 0`. Estas helpers
+-- abstraen la diferencia para que callers no tengan que ramificar.
+
+-- Acepta itemID numerico, item name, item link ("|Hitem:..."). Devuelve itemID.
+function ns.GetItemIDFromInput(input)
+    if not input then return nil end
+    if type(input) == "number" then return input end
+    local s = tostring(input):trim()
+    if s == "" then return nil end
+    local id = tonumber(s)
+    if id then return id end
+    -- itemLink: parseamos "|Hitem:NNNN:..." manualmente porque GetItemInfoInstant
+    -- acepta links pero queremos solo el itemID.
+    local linkID = s:match("|Hitem:(%d+)")
+    if linkID then return tonumber(linkID) end
+    -- name lookup via GetItemInfoInstant (sincrono, no requiere item cargado).
+    if C_Item and C_Item.GetItemInfoInstant then
+        local iid = C_Item.GetItemInfoInstant(s)
+        if iid then return iid end
+    elseif GetItemInfoInstant then
+        local iid = GetItemInfoInstant(s)
+        if iid then return iid end
+    end
+    return nil
+end
+
+-- Devuelve (name, iconID) para un itemID. Usa C_Item.GetItemInfo cuando
+-- disponible (Retail Midnight); fallback a GetItemInfo legacy. Si el item no
+-- esta cacheado todavia (cliente recien iniciado) puede devolver placeholder
+-- — el caller deberia re-renderizar al recibir GET_ITEM_INFO_RECEIVED.
+function ns.GetItemDisplayInfo(itemID)
+    if not itemID then return tostring(itemID), 134400 end
+    local name, icon
+    if C_Item and C_Item.GetItemInfo then
+        name = C_Item.GetItemInfo(itemID)
+    end
+    if not name and GetItemInfo then name = GetItemInfo(itemID) end
+    if C_Item and C_Item.GetItemIconByID then
+        icon = C_Item.GetItemIconByID(itemID)
+    end
+    if (not icon or icon == 0) and GetItemIcon then icon = GetItemIcon(itemID) end
+    if not icon or icon == 0 then icon = 134400 end
+    return name or ("Item:" .. tostring(itemID)), icon
+end
+
+-- Resuelve identidad + display de una entry (spell o item) sin que el caller
+-- tenga que ramificar. Devuelve (name, iconID, kind) — kind="spell"|"item".
+function ns.GetEntryDisplayInfo(entry)
+    if not entry then return "?", 134400, "spell" end
+    if entry.itemID and entry.itemID > 0 then
+        local n, i = ns.GetItemDisplayInfo(entry.itemID)
+        return n, i, "item"
+    end
+    local n, i = ns.GetSpellDisplayInfo(entry.spellID)
+    return n, i, "spell"
+end
+
+-- Clave estable de identidad por entry. La usan caches por-entry (lastStatus en
+-- CooldownPulse, etc.) que necesitan distinguir spell-ID 12345 de item-ID 12345.
+function ns.GetEntryKey(entry)
+    if not entry then return nil end
+    if entry.itemID and entry.itemID > 0 then return "i" .. entry.itemID end
+    if entry.spellID then return "s" .. entry.spellID end
+    return nil
+end
+
+-- Borrar entry de la lista por id, distinguiendo spell vs item. Reemplaza
+-- ns.RemoveSpellEntry(list, id) en sitios que pueden contener ambos tipos.
+function ns.RemoveEntryByKey(list, key)
+    if not (list and key) then return false end
+    for i, entry in ipairs(list) do
+        if ns.GetEntryKey(entry) == key then
+            table.remove(list, i); return true
+        end
+    end
+    return false
 end
 
 -- ============================================================

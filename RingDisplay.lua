@@ -106,6 +106,12 @@ end
 -- lo usa para decidir entre fast poll (anillo cuenta atras visible) y idle poll.
 local hasActiveTimer = false
 
+-- Forward decl: UpdateRings la referencia en la transicion test→no-test, pero
+-- la definicion real esta mas abajo (depende de displayAnchor/inCombat que se
+-- declaran despues). Sin este forward, Lua resuelve la llamada a global nil y
+-- explota cuando un test del ring expira ("attempt to call a nil value").
+local ApplyRingVisibility
+
 local function UpdateRings()
     local db = ns.db
     local ringIndex = 0
@@ -136,7 +142,8 @@ local function UpdateRings()
     if hadTest and not hasTest then ApplyRingVisibility() end
 
     for i, entry in ipairs(db.ringAuras) do
-        if entry.enabled and ns.IsEntryAllowedForCurrentSpec(entry) and ns.IsEntryAllowedForRequiredTalent(entry) then
+        if entry.enabled and ns.IsEntryAllowedForCurrentSpec(entry) and ns.IsEntryAllowedForRequiredTalent(entry)
+           and ns.IsEntryAllowedForCurrentInstance(entry) then
             local status = ns:GetAuraStatus(entry.spellID, entry.unit, entry.filter, entry.manualDuration)
             if status.remaining and status.remaining > 0 then anyTimer = true end
 
@@ -191,7 +198,9 @@ end
 
 local inCombat = false
 
-local function ApplyRingVisibility()
+-- Asignamos al forward decl declarado al principio del archivo (linea ~109).
+-- Sin esto la referencia en UpdateRings queda colgando como global nil.
+ApplyRingVisibility = function()
     if not displayAnchor then return end
     local hasTest = #testEntries > 0
     local shouldShow = hasTest or (isVisible and ns.db.ringDisplay.enabled

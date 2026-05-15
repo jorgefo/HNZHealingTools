@@ -138,12 +138,16 @@ local function ProcessPulseSpell(entry, soundEnabledKey, soundNameKey, soundChan
     if not (entry and entry.enabled) then return end
     if ns.IsEntryAllowedForCurrentSpec and not ns.IsEntryAllowedForCurrentSpec(entry) then return end
     if ns.IsEntryAllowedForRequiredTalent and not ns.IsEntryAllowedForRequiredTalent(entry) then return end
-    local sid = entry.spellID
-    if not sid then return end
-    local status = ns:GetSpellStatus(sid)
+    if ns.IsEntryAllowedForCurrentInstance and not ns.IsEntryAllowedForCurrentInstance(entry) then return end
+    -- Key estable que distingue spell vs item (ambos pueden compartir IDs
+    -- numericos). lastStatus/seenSpell estan keyed por esta string en lugar de
+    -- por spellID directo desde que aceptamos entries item-based.
+    local key = ns.GetEntryKey and ns.GetEntryKey(entry) or (entry.spellID and ("s"..entry.spellID))
+    if not key then return end
+    local status = ns:GetEntryStatus(entry)
     local newSt = status.status
-    if seenSpell[sid] then
-        local prev = lastStatus[sid]
+    if seenSpell[key] then
+        local prev = lastStatus[key]
         -- Trigger when leaving the COOLDOWN state to READY. Other transitions
         -- (NO_POWER->READY, OUT_OF_RANGE->READY) just reflect player state and
         -- would be noisy.
@@ -152,14 +156,15 @@ local function ProcessPulseSpell(entry, soundEnabledKey, soundNameKey, soundChan
             ns:ShowPulse(status.icon, status.name, entry[soundEnabledKey], entry[soundNameKey], channel)
         end
     end
-    lastStatus[sid] = newSt
-    seenSpell[sid] = true
+    lastStatus[key] = newSt
+    seenSpell[key] = true
 end
 
 local function ProcessPulseAura(entry)
     if not (entry and entry.enabled) then return end
     if ns.IsEntryAllowedForCurrentSpec and not ns.IsEntryAllowedForCurrentSpec(entry) then return end
     if ns.IsEntryAllowedForRequiredTalent and not ns.IsEntryAllowedForRequiredTalent(entry) then return end
+    if ns.IsEntryAllowedForCurrentInstance and not ns.IsEntryAllowedForCurrentInstance(entry) then return end
     local sid = entry.spellID
     if not sid or not ns.GetAuraStatus then return end
     local unit, filter = entry.unit or "player", entry.filter or "HELPFUL"
@@ -327,8 +332,15 @@ end
 function ns:TestPulseEntry(entry)
     -- Test per-entry desde el row del config: dispara un pulse one-shot con el
     -- icono/sonido de esta entry especifica (bypass del toggle enabled global).
-    if not entry or not entry.spellID then return end
-    local nm, ic = ns.GetSpellDisplayInfo(entry.spellID)
+    if not entry then return end
+    local nm, ic
+    if entry.itemID and entry.itemID > 0 then
+        nm, ic = ns.GetItemDisplayInfo(entry.itemID)
+    elseif entry.spellID then
+        nm, ic = ns.GetSpellDisplayInfo(entry.spellID)
+    else
+        return
+    end
     local soundEnabled = entry.soundEnabled or entry.cdPulseSound
     local soundName = entry.soundName or entry.cdPulseSoundName
     local soundChannel = entry.soundChannel

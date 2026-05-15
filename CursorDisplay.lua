@@ -149,8 +149,11 @@ local function UpdateData()
 
     for _, entry in ipairs(db.cursorSpells) do
         if entry.enabled and ns.IsEntryAllowedForCurrentSpec(entry) and ns.IsEntryAllowedForRequiredTalent(entry)
+           and ns.IsEntryAllowedForCurrentInstance(entry)
            and ns.MatchesVisibility(entry.visibility, inCombat) then
-            local status = ns:GetSpellStatus(entry.spellID)
+            -- Dispatcher: la misma lista mezcla entries spell-based (legacy) y
+            -- item-based (trinkets/use-items). GetEntryStatus elige la API correcta.
+            local status = ns:GetEntryStatus(entry)
             if status.cooldownRemaining and status.cooldownRemaining > 0 then anyTimer = true end
             local hide = entry.hideOnCooldown and status.status == "COOLDOWN"
             if not hide and entry.minCharges and entry.minCharges > 0 then
@@ -188,6 +191,7 @@ local function UpdateData()
 
     for _, entry in ipairs(db.cursorAuras) do
         if entry.enabled and ns.IsEntryAllowedForCurrentSpec(entry) and ns.IsEntryAllowedForRequiredTalent(entry)
+           and ns.IsEntryAllowedForCurrentInstance(entry)
            and ns.MatchesVisibility(entry.visibility, inCombat) then
             local status = ns:GetAuraStatus(entry.spellID, entry.unit, entry.filter, entry.manualDuration)
             if status.remaining and status.remaining > 0 then anyTimer = true end
