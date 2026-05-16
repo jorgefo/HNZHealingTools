@@ -397,6 +397,7 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
         ns:InitMrtTimeline()
         ns:InitConfig()
         ns:InitMinimapButton()
+        ns:InitPublicAPI()
         print(string.format("|cff00ccffHNZ Healing Tools|r %s. %s |cff00ff00%s|r. %s |cff00ff00/hht|r %s.",
             ns.L["loaded"], ns.L["Profile:"], active, ns.L["Type"], ns.L["for options"]))
         -- Defer al final del flujo de login para que el popup salga despues del
@@ -476,4 +477,26 @@ function ns:ImportProfile(name, dataStr)
     ns.MigrateProfile(data, name)
     ns.MergeDefaults(data, ns.PROFILE_DEFAULTS)
     return true
+end
+
+-- ============================================================
+-- Public API: _G.HNZHealingTools
+-- ============================================================
+-- Namespace expuesto para que macros / otros addons interactuen con el addon
+-- sin tener que tocar el namespace privado `ns`. Mantenelo MINIMO y estable —
+-- agregar metodos es libre, sacarlos rompe consumidores externos.
+function ns:InitPublicAPI()
+    local api = {}
+    api.version = ns.VERSION
+
+    -- Trigger(key): dispara todas las entries cursorAura/ringAura cuyo
+    -- entry.triggerKey coincida (case-insensitive). Para usar en macros:
+    --   /run HNZHealingTools.Trigger("ohshit")
+    -- o equivalentemente /hht trigger ohshit.
+    -- Devuelve la cantidad de entries que matchearon (0 = ninguna).
+    function api.Trigger(key)
+        return ns:FireExternalTrigger(key)
+    end
+
+    _G.HNZHealingTools = api
 end

@@ -13,6 +13,18 @@ function ns:InitConfig()
         elseif cmd == "cdm" then ns:DumpCdm()
         elseif cmd == "status" then ns:DumpCursorStatus(); ns:DumpRingStatus()
         elseif cmd == "minimap" then if ns.ToggleMinimapButton then ns:ToggleMinimapButton() end
+        elseif cmd == "trigger" then
+            local key = rest and rest:match("^%s*(%S+)") or nil
+            if not key or key == "" then
+                print("|cff00ccffHNZ|r "..ns.L["Usage: /hht trigger <key>"])
+            else
+                local n = ns:FireExternalTrigger(key)
+                if n > 0 then
+                    print(string.format("|cff00ccffHNZ|r "..ns.L["Triggered %d entrie(s) for key '%s'"], n, key))
+                else
+                    print(string.format("|cff00ccffHNZ|r "..ns.L["No entries match triggerKey '%s'"], key))
+                end
+            end
         else ns:ToggleConfigWindow() end
     end
     ns:CreateConfigWindow()
@@ -1551,7 +1563,7 @@ local function CreateCursorSpellEditor()
 end
 
 local function CreateCursorAuraEditor()
-    local f=CreateEditorFrame("HNZHealingToolsCursorAuraEditor",ns.L["Cursor Aura"],500,520)
+    local f=CreateEditorFrame("HNZHealingToolsCursorAuraEditor",ns.L["Cursor Aura"],500,546)
     local p=f.content
     local editingEntry
 
@@ -1602,19 +1614,25 @@ local function CreateCursorAuraEditor()
     local til=t1:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); til:SetPoint("LEFT",tse,"RIGHT",10,0); til:SetText(ns.L["Trigger item:"])
     local tie=EditBox(t1,60); tie:SetPoint("LEFT",til,"RIGHT",4,0); tie:SetText("0"); tie:SetNumeric(true)
     local tHint=InfoHint(t1, ns.L["Workaround for fully-restricted auras: when the trigger spell is cast OR the trigger item is used, the aura is treated as ACTIVE for the manual duration above. Use only when the standard detection paths fail (verify with /hht auradebug)."]); tHint:SetPoint("LEFT",tie,"RIGHT",6,0)
-    local sfl=t1:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); sfl:SetPoint("TOPLEFT",4,-178); sfl:SetText(ns.L["Stack text size (0=default):"])
+    -- External trigger key: macro/other-addon entry-point. Cuando se llama
+    -- /hht trigger <key> o HNZHealingTools.Trigger(key), las entries con este
+    -- triggerKey se marcan ACTIVE durante manualDuration segundos.
+    local tkl=t1:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); tkl:SetPoint("TOPLEFT",4,-180); tkl:SetText(ns.L["Trigger key:"])
+    local tke=EditBox(t1,140); tke:SetPoint("LEFT",tkl,"RIGHT",4,0)
+    local tkHint=InfoHint(t1, ns.L["Optional. Fire this aura from a macro: /hht trigger <key>. Requires Duration > 0. Case-insensitive."]); tkHint:SetPoint("LEFT",tke,"RIGHT",6,0)
+    local sfl=t1:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); sfl:SetPoint("TOPLEFT",4,-204); sfl:SetText(ns.L["Stack text size (0=default):"])
     local sfe=EditBox(t1,40); sfe:SetPoint("LEFT",sfl,"RIGHT",6,0); sfe:SetText("0"); sfe:SetNumeric(true)
 
-    local visLbl=t1:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); visLbl:SetPoint("TOPLEFT",4,-204); visLbl:SetText(ns.L["Visibility:"])
+    local visLbl=t1:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); visLbl:SetPoint("TOPLEFT",4,-230); visLbl:SetText(ns.L["Visibility:"])
     local visDD=VisibilityDropdown(t1, function() return "always" end, function() end)
     visDD:SetPoint("LEFT",visLbl,"RIGHT",6,0)
 
-    local spLabel=t1:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); spLabel:SetPoint("TOPLEFT",4,-234); spLabel:SetText(ns.L["Specs:"])
-    local spChk=SpecChecklist(t1); spChk:SetPoint("TOPLEFT",4,-250)
-    local tlLabel=t1:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); tlLabel:SetPoint("TOPLEFT",4,-282); tlLabel:SetText(ns.L["Required talent:"])
-    local tlPick=TalentPicker(t1); tlPick:SetPoint("TOPLEFT",4,-298)
-    local itLabel=t1:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); itLabel:SetPoint("TOPLEFT",4,-330); itLabel:SetText(ns.L["Show only in:"])
-    local itChk=InstanceTypeChecklist(t1); itChk:SetPoint("TOPLEFT",4,-346)
+    local spLabel=t1:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); spLabel:SetPoint("TOPLEFT",4,-260); spLabel:SetText(ns.L["Specs:"])
+    local spChk=SpecChecklist(t1); spChk:SetPoint("TOPLEFT",4,-276)
+    local tlLabel=t1:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); tlLabel:SetPoint("TOPLEFT",4,-308); tlLabel:SetText(ns.L["Required talent:"])
+    local tlPick=TalentPicker(t1); tlPick:SetPoint("TOPLEFT",4,-324)
+    local itLabel=t1:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); itLabel:SetPoint("TOPLEFT",4,-356); itLabel:SetText(ns.L["Show only in:"])
+    local itChk=InstanceTypeChecklist(t1); itChk:SetPoint("TOPLEFT",4,-372)
 
     -- ============ Tab 2: Display ============
     local isSlider = MakeSlider(t2, ns.L["Icon size (0=global):"], 0, 128, 1, "iconSize")
@@ -1674,6 +1692,7 @@ local function CreateCursorAuraEditor()
         -- para que GetTrackedSets/FireManualTriggerByID puedan saltearse rapido.
         local ts = tonumber(tse:GetText()) or 0; e.manualTriggerSpellID = (ts > 0) and ts or nil
         local ti = tonumber(tie:GetText()) or 0; e.manualTriggerItemID  = (ti > 0) and ti or nil
+        local tk = (tke:GetText() or ""):trim(); e.triggerKey = (tk ~= "") and tk or nil
     end
 
     saveBtn:SetScript("OnClick",function()
@@ -1699,7 +1718,7 @@ local function CreateCursorAuraEditor()
         editingEntry=nil; eb:SetText(""); eb:Enable()
         ud:SetValue("target"); fd:SetValue("HELPFUL")
         swd:SetValue("ALWAYS"); ske:SetText("0"); de:SetText("0"); sfe:SetText("0")
-        tse:SetText("0"); tie:SetText("0")
+        tse:SetText("0"); tie:SetText("0"); tke:SetText("")
         hsoCk:SetChecked(false); htCk:SetChecked(false); cpCk:SetChecked(false)
         sndCk:SetChecked(false); sndPick:SetSoundName("Default")
         spChk:SetSpecs(nil); tlPick:SetSpellID(nil); itChk:SetTypes(nil); fb:SetText("")
@@ -1727,6 +1746,7 @@ local function CreateCursorAuraEditor()
         sfe:SetText(tostring(entry.stackFontSize or 0))
         tse:SetText(tostring(entry.manualTriggerSpellID or 0))
         tie:SetText(tostring(entry.manualTriggerItemID or 0))
+        tke:SetText(tostring(entry.triggerKey or ""))
         hsoCk:SetChecked(entry.hideStatusOverlay and true or false)
         htCk:SetChecked(entry.hideTimer and true or false)
         cpCk:SetChecked(entry.cdPulse and true or false)
@@ -1748,7 +1768,7 @@ local function CreateCursorAuraEditor()
 end
 
 local function CreateRingAuraEditor()
-    local f=CreateEditorFrame("HNZHealingToolsRingAuraEditor",ns.L["Ring Aura"],500,540)
+    local f=CreateEditorFrame("HNZHealingToolsRingAuraEditor",ns.L["Ring Aura"],500,566)
     local p=f.content
     local editingEntry
     local pc=ns.DeepCopy(ns.DEFAULT_COLORS[1])
@@ -1789,16 +1809,22 @@ local function CreateRingAuraEditor()
     local til=t1:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); til:SetPoint("LEFT",tse,"RIGHT",10,0); til:SetText(ns.L["Trigger item:"])
     local tie=EditBox(t1,60); tie:SetPoint("LEFT",til,"RIGHT",4,0); tie:SetText("0"); tie:SetNumeric(true)
     local tHint=InfoHint(t1, ns.L["Workaround for fully-restricted auras: when the trigger spell is cast OR the trigger item is used, the aura is treated as ACTIVE for the manual duration above. Use only when the standard detection paths fail (verify with /hht auradebug)."]); tHint:SetPoint("LEFT",tie,"RIGHT",6,0)
+    -- External trigger key (macro / public API). Mismo mecanismo subyacente que
+    -- el manual trigger spell/item, pero disparado desde /hht trigger <key> o
+    -- HNZHealingTools.Trigger(key). Requiere manualDuration > 0.
+    local tkl=t1:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); tkl:SetPoint("TOPLEFT",4,-204); tkl:SetText(ns.L["Trigger key:"])
+    local tke=EditBox(t1,140); tke:SetPoint("LEFT",tkl,"RIGHT",4,0)
+    local tkHint=InfoHint(t1, ns.L["Optional. Fire this aura from a macro: /hht trigger <key>. Requires Duration > 0. Case-insensitive."]); tkHint:SetPoint("LEFT",tke,"RIGHT",6,0)
 
-    local sic=CreateFrame("CheckButton",nil,t1,"UICheckButtonTemplate"); sic:SetSize(18,18); sic:SetPoint("TOPLEFT",2,-208); sic:SetChecked(true); SkinCheck(sic)
+    local sic=CreateFrame("CheckButton",nil,t1,"UICheckButtonTemplate"); sic:SetSize(18,18); sic:SetPoint("TOPLEFT",2,-234); sic:SetChecked(true); SkinCheck(sic)
     local sil=t1:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); sil:SetPoint("LEFT",sic,"RIGHT",6,0); sil:SetText(ns.L["Show icon on ring"]); sil:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
 
-    local spLabel=t1:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); spLabel:SetPoint("TOPLEFT",4,-238); spLabel:SetText(ns.L["Specs:"])
-    local spChk=SpecChecklist(t1); spChk:SetPoint("TOPLEFT",4,-254)
-    local tlLabel=t1:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); tlLabel:SetPoint("TOPLEFT",4,-286); tlLabel:SetText(ns.L["Required talent:"])
-    local tlPick=TalentPicker(t1); tlPick:SetPoint("TOPLEFT",4,-302)
-    local itLabel=t1:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); itLabel:SetPoint("TOPLEFT",4,-334); itLabel:SetText(ns.L["Show only in:"])
-    local itChk=InstanceTypeChecklist(t1); itChk:SetPoint("TOPLEFT",4,-350)
+    local spLabel=t1:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); spLabel:SetPoint("TOPLEFT",4,-264); spLabel:SetText(ns.L["Specs:"])
+    local spChk=SpecChecklist(t1); spChk:SetPoint("TOPLEFT",4,-280)
+    local tlLabel=t1:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); tlLabel:SetPoint("TOPLEFT",4,-312); tlLabel:SetText(ns.L["Required talent:"])
+    local tlPick=TalentPicker(t1); tlPick:SetPoint("TOPLEFT",4,-328)
+    local itLabel=t1:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); itLabel:SetPoint("TOPLEFT",4,-360); itLabel:SetText(ns.L["Show only in:"])
+    local itChk=InstanceTypeChecklist(t1); itChk:SetPoint("TOPLEFT",4,-376)
 
     -- ============ Tab 2: Effects ============
     local cpCk=CreateFrame("CheckButton",nil,t2,"UICheckButtonTemplate"); cpCk:SetSize(18,18); cpCk:SetPoint("TOPLEFT",2,-4); SkinCheck(cpCk)
@@ -1829,6 +1855,7 @@ local function CreateRingAuraEditor()
         e.instanceTypes=itChk:GetTypes()
         local ts = tonumber(tse:GetText()) or 0; e.manualTriggerSpellID = (ts > 0) and ts or nil
         local ti = tonumber(tie:GetText()) or 0; e.manualTriggerItemID  = (ti > 0) and ti or nil
+        local tk = (tke:GetText() or ""):trim(); e.triggerKey = (tk ~= "") and tk or nil
     end
 
     saveBtn:SetScript("OnClick",function()
@@ -1854,6 +1881,8 @@ local function CreateRingAuraEditor()
                     local ti = tonumber(tie:GetText()) or 0
                     added.manualTriggerSpellID = (ts > 0) and ts or nil
                     added.manualTriggerItemID  = (ti > 0) and ti or nil
+                    local tk = (tke:GetText() or ""):trim()
+                    added.triggerKey = (tk ~= "") and tk or nil
                 end
             end
             ns:RebuildRingDisplay()
@@ -1866,7 +1895,7 @@ local function CreateRingAuraEditor()
         editingEntry=nil; eb:SetText(""); eb:Enable()
         ud:SetValue("player"); fd:SetValue("HELPFUL")
         swd:SetValue("ACTIVE"); ske:SetText("0"); de:SetText("0"); sic:SetChecked(true)
-        tse:SetText("0"); tie:SetText("0")
+        tse:SetText("0"); tie:SetText("0"); tke:SetText("")
         cpCk:SetChecked(false); sndCk:SetChecked(false); sndPick:SetSoundName("Default")
         spChk:SetSpecs(nil); tlPick:SetSpellID(nil); itChk:SetTypes(nil); fb:SetText("")
         if useNextColor then
@@ -1891,6 +1920,7 @@ local function CreateRingAuraEditor()
         de:SetText(tostring(entry.manualDuration or 0)); sic:SetChecked(entry.showIcon and true or false)
         tse:SetText(tostring(entry.manualTriggerSpellID or 0))
         tie:SetText(tostring(entry.manualTriggerItemID or 0))
+        tke:SetText(tostring(entry.triggerKey or ""))
         cpCk:SetChecked(entry.cdPulse and true or false)
         sndCk:SetChecked(entry.playSound and true or false)
         sndPick:SetSoundName(entry.soundName or (entry.soundID and tostring(entry.soundID)) or "Default")
@@ -1925,7 +1955,7 @@ local PULSE_FILTERS = {
 
 local function CreatePulseSpellEditor()
     -- Bump altura: agregamos InstanceTypeChecklist en t1 debajo del input.
-    local f=CreateEditorFrame("HNZHealingToolsPulseSpellEditor",ns.L["Pulse Spell"],460,360)
+    local f=CreateEditorFrame("HNZHealingToolsPulseSpellEditor",ns.L["Pulse Spell"],460,390)
     local p=f.content
     local editingEntry
 
@@ -1937,8 +1967,11 @@ local function CreatePulseSpellEditor()
     local nl=t1:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); nl:SetPoint("TOPLEFT",4,-4); nl:SetText(ns.L["Spell name or ID:"])
     local eb=EditBox(t1,360); eb:SetPoint("TOPLEFT",4,-22)
     AttachSpellAutocomplete(eb)
-    local itLabel=t1:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); itLabel:SetPoint("TOPLEFT",4,-56); itLabel:SetText(ns.L["Show only in:"])
-    local itChk=InstanceTypeChecklist(t1); itChk:SetPoint("TOPLEFT",4,-72)
+    local tkl=t1:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); tkl:SetPoint("TOPLEFT",4,-58); tkl:SetText(ns.L["Trigger key:"])
+    local tke=EditBox(t1,140); tke:SetPoint("LEFT",tkl,"RIGHT",4,0)
+    local tkHint=InfoHint(t1, ns.L["Optional. Fire this pulse from a macro: /hht trigger <key>. Case-insensitive."]); tkHint:SetPoint("LEFT",tke,"RIGHT",6,0)
+    local itLabel=t1:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); itLabel:SetPoint("TOPLEFT",4,-90); itLabel:SetText(ns.L["Show only in:"])
+    local itChk=InstanceTypeChecklist(t1); itChk:SetPoint("TOPLEFT",4,-106)
 
     -- ============ Tab 2: Sound ============
     local sndCk=CreateFrame("CheckButton",nil,t2,"UICheckButtonTemplate"); sndCk:SetSize(18,18); sndCk:SetPoint("TOPLEFT",2,-4); SkinCheck(sndCk)
@@ -1966,6 +1999,7 @@ local function CreatePulseSpellEditor()
         e.soundName=sndPick:GetSoundName() or "Default"
         e.soundChannel=chDD:GetValue() or "Master"
         e.instanceTypes=itChk:GetTypes()
+        local tk = (tke:GetText() or ""):trim(); e.triggerKey = (tk ~= "") and tk or nil
     end
 
     saveBtn:SetScript("OnClick",function()
@@ -1990,7 +2024,7 @@ local function CreatePulseSpellEditor()
     local function Reset()
         editingEntry=nil; eb:SetText(""); eb:Enable()
         sndCk:SetChecked(false); sndPick:SetSoundName("Default")
-        chDD:SetValue("Master"); itChk:SetTypes(nil); fb:SetText("")
+        chDD:SetValue("Master"); itChk:SetTypes(nil); tke:SetText(""); fb:SetText("")
     end
 
     local editor={}
@@ -2007,13 +2041,14 @@ local function CreatePulseSpellEditor()
         sndPick:SetSoundName(entry.soundName or "Default")
         chDD:SetValue(entry.soundChannel or "Master")
         itChk:SetTypes(entry.instanceTypes)
+        tke:SetText(tostring(entry.triggerKey or ""))
         f.title:SetText("|cff00ccff"..ns.L["Edit Pulse Spell"].."|r"); saveBtn:SetText(ns.L["Save"]); f:Show()
     end
     return editor
 end
 
 local function CreatePulseAuraEditor()
-    local f=CreateEditorFrame("HNZHealingToolsPulseAuraEditor",ns.L["Pulse Aura"],460,380)
+    local f=CreateEditorFrame("HNZHealingToolsPulseAuraEditor",ns.L["Pulse Aura"],460,410)
     local p=f.content
     local editingEntry
 
@@ -2031,8 +2066,12 @@ local function CreatePulseAuraEditor()
     local fl=t1:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); fl:SetPoint("LEFT",udd,"RIGHT",16,0); fl:SetText(ns.L["Filter:"])
     local fdd=Dropdown(t1,90,PULSE_FILTERS,"HELPFUL"); fdd:SetPoint("LEFT",fl,"RIGHT",6,0)
 
-    local itLabel=t1:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); itLabel:SetPoint("TOPLEFT",4,-92); itLabel:SetText(ns.L["Show only in:"])
-    local itChk=InstanceTypeChecklist(t1); itChk:SetPoint("TOPLEFT",4,-108)
+    local tkl=t1:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); tkl:SetPoint("TOPLEFT",4,-94); tkl:SetText(ns.L["Trigger key:"])
+    local tke=EditBox(t1,140); tke:SetPoint("LEFT",tkl,"RIGHT",4,0)
+    local tkHint=InfoHint(t1, ns.L["Optional. Fire this pulse from a macro: /hht trigger <key>. Case-insensitive."]); tkHint:SetPoint("LEFT",tke,"RIGHT",6,0)
+
+    local itLabel=t1:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); itLabel:SetPoint("TOPLEFT",4,-126); itLabel:SetText(ns.L["Show only in:"])
+    local itChk=InstanceTypeChecklist(t1); itChk:SetPoint("TOPLEFT",4,-142)
 
     -- ============ Tab 2: Sound ============
     local sndCk=CreateFrame("CheckButton",nil,t2,"UICheckButtonTemplate"); sndCk:SetSize(18,18); sndCk:SetPoint("TOPLEFT",2,-4); SkinCheck(sndCk)
@@ -2062,6 +2101,7 @@ local function CreatePulseAuraEditor()
         e.soundName=sndPick:GetSoundName() or "Default"
         e.soundChannel=chDD:GetValue() or "Master"
         e.instanceTypes=itChk:GetTypes()
+        local tk = (tke:GetText() or ""):trim(); e.triggerKey = (tk ~= "") and tk or nil
     end
 
     saveBtn:SetScript("OnClick",function()
@@ -2085,7 +2125,7 @@ local function CreatePulseAuraEditor()
         editingEntry=nil; eb:SetText(""); eb:Enable()
         udd:SetValue("player"); fdd:SetValue("HELPFUL")
         sndCk:SetChecked(false); sndPick:SetSoundName("Default")
-        chDD:SetValue("Master"); itChk:SetTypes(nil); fb:SetText("")
+        chDD:SetValue("Master"); itChk:SetTypes(nil); tke:SetText(""); fb:SetText("")
     end
 
     local editor={}
@@ -2103,6 +2143,7 @@ local function CreatePulseAuraEditor()
         sndPick:SetSoundName(entry.soundName or "Default")
         chDD:SetValue(entry.soundChannel or "Master")
         itChk:SetTypes(entry.instanceTypes)
+        tke:SetText(tostring(entry.triggerKey or ""))
         f.title:SetText("|cff00ccff"..ns.L["Edit Pulse Aura"].."|r"); saveBtn:SetText(ns.L["Save"]); f:Show()
     end
     return editor
@@ -2176,6 +2217,12 @@ local function CreateCursorItemEditor()
     local visLbl=t1:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); visLbl:SetPoint("TOPLEFT",4,-130); visLbl:SetText(ns.L["Visibility:"])
     local visDD=VisibilityDropdown(t1, function() return "always" end, function() end)
     visDD:SetPoint("LEFT",visLbl,"RIGHT",6,0)
+    -- Trigger key (macro): comparte la misma fila que Visibility para no sumar
+    -- altura al modal. ShowPulse se dispara desde FireExternalTrigger usando el
+    -- icono+nombre del item (mismo flujo que un Pulse Item).
+    local tkl=t1:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); tkl:SetPoint("LEFT",visDD,"RIGHT",16,0); tkl:SetText(ns.L["Trigger key:"])
+    local tke=EditBox(t1,140); tke:SetPoint("LEFT",tkl,"RIGHT",4,0)
+    local tkHint=InfoHint(t1, ns.L["Optional. Fire this item from a macro: /hht trigger <key>. Case-insensitive."]); tkHint:SetPoint("LEFT",tke,"RIGHT",6,0)
 
     local spLabel=t1:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); spLabel:SetPoint("TOPLEFT",4,-162); spLabel:SetText(ns.L["Specs:"])
     local spChk=SpecChecklist(t1); spChk:SetPoint("TOPLEFT",4,-178)
@@ -2239,6 +2286,7 @@ local function CreateCursorItemEditor()
         e.offsetY=draft.offsetY
         e.specs=spChk:GetSpecs()
         e.instanceTypes=itChk:GetTypes()
+        local tk = (tke:GetText() or ""):trim(); e.triggerKey = (tk ~= "") and tk or nil
     end
 
     saveBtn:SetScript("OnClick",function()
@@ -2269,7 +2317,7 @@ local function CreateCursorItemEditor()
         editingEntry=nil; eb:SetText(""); eb:Enable()
         hcdCk:SetChecked(false); hsoCk:SetChecked(false); htCk:SetChecked(false)
         cpCk:SetChecked(false); cpsCk:SetChecked(false); cpsPick:SetSoundName("Default")
-        spChk:SetSpecs(nil); itChk:SetTypes(nil); fb:SetText("")
+        spChk:SetSpecs(nil); itChk:SetTypes(nil); tke:SetText(""); fb:SetText("")
         visDD:SetValue("always")
         cpCkPos:SetChecked(false)
         draft.iconSize=0; draft.opacity=0; draft.offsetX=0; draft.offsetY=0
@@ -2303,6 +2351,7 @@ local function CreateCursorItemEditor()
         draft.offsetY=tonumber(entry.offsetY) or 0
         RefreshSliders()
         spChk:SetSpecs(entry.specs); itChk:SetTypes(entry.instanceTypes)
+        tke:SetText(tostring(entry.triggerKey or ""))
         local n = ns.GetItemDisplayInfo(entry.itemID or 0)
         f.title:SetText("|cff00ccff"..ns.L["Editing: "]..n.."|r")
         saveBtn:SetText(ns.L["Update"]); f:Show()
@@ -2313,7 +2362,7 @@ end
 -- Pulse Item editor mirror del Pulse Spell editor: tabs General (identidad +
 -- instance filter) y Sound (toggle + picker + channel + test).
 local function CreatePulseItemEditor()
-    local f=CreateEditorFrame("HNZHealingToolsItempulseEditor", ns.L["Pulse Item"], 480, 360)
+    local f=CreateEditorFrame("HNZHealingToolsItempulseEditor", ns.L["Pulse Item"], 480, 394)
     local p=f.content
     local editingEntry
 
@@ -2323,8 +2372,12 @@ local function CreatePulseItemEditor()
     -- ============ Tab 1: General ============
     local eb, RefreshPreview = BuildItemIdentityField(t1, 400)
 
-    local itLabel=t1:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); itLabel:SetPoint("TOPLEFT",4,-130); itLabel:SetText(ns.L["Show only in:"])
-    local itChk=InstanceTypeChecklist(t1); itChk:SetPoint("TOPLEFT",4,-146)
+    local tkl=t1:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); tkl:SetPoint("TOPLEFT",4,-128); tkl:SetText(ns.L["Trigger key:"])
+    local tke=EditBox(t1,140); tke:SetPoint("LEFT",tkl,"RIGHT",4,0)
+    local tkHint=InfoHint(t1, ns.L["Optional. Fire this pulse from a macro: /hht trigger <key>. Case-insensitive."]); tkHint:SetPoint("LEFT",tke,"RIGHT",6,0)
+
+    local itLabel=t1:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); itLabel:SetPoint("TOPLEFT",4,-160); itLabel:SetText(ns.L["Show only in:"])
+    local itChk=InstanceTypeChecklist(t1); itChk:SetPoint("TOPLEFT",4,-176)
 
     -- ============ Tab 2: Sound ============
     local sndCk=CreateFrame("CheckButton",nil,t2,"UICheckButtonTemplate"); sndCk:SetSize(18,18); sndCk:SetPoint("TOPLEFT",2,-4); SkinCheck(sndCk)
@@ -2352,6 +2405,7 @@ local function CreatePulseItemEditor()
         e.soundName=sndPick:GetSoundName() or "Default"
         e.soundChannel=chDD:GetValue() or "Master"
         e.instanceTypes=itChk:GetTypes()
+        local tk = (tke:GetText() or ""):trim(); e.triggerKey = (tk ~= "") and tk or nil
     end
 
     saveBtn:SetScript("OnClick",function()
@@ -2381,7 +2435,7 @@ local function CreatePulseItemEditor()
     local function Reset()
         editingEntry=nil; eb:SetText(""); eb:Enable()
         sndCk:SetChecked(false); sndPick:SetSoundName("Default")
-        chDD:SetValue("Master"); itChk:SetTypes(nil); fb:SetText("")
+        chDD:SetValue("Master"); itChk:SetTypes(nil); tke:SetText(""); fb:SetText("")
         RefreshPreview()
     end
 
@@ -2401,6 +2455,7 @@ local function CreatePulseItemEditor()
         sndPick:SetSoundName(entry.soundName or "Default")
         chDD:SetValue(entry.soundChannel or "Master")
         itChk:SetTypes(entry.instanceTypes)
+        tke:SetText(tostring(entry.triggerKey or ""))
         local n = ns.GetItemDisplayInfo(entry.itemID or 0)
         f.title:SetText("|cff00ccff"..ns.L["Editing: "]..n.."|r")
         saveBtn:SetText(ns.L["Update"]); f:Show()
@@ -2427,6 +2482,175 @@ end
 -- ============================================================
 -- Page Builders
 -- ============================================================
+
+-- mainWindow forward-declared: el upvalue se asigna en CreateConfigWindow mas
+-- abajo, pero los popups de preview definidos en este bloque lo capturan en
+-- parse-time. Sin esta declaracion temprana Lua tratara mainWindow como un
+-- global nil dentro de las closures, y el SetPoint contra mainWindow nunca
+-- corre → ventana aparece sin posicion y se ve invisible.
+local mainWindow
+
+-- ============================================================
+-- Preview popup helpers
+-- ============================================================
+-- Cada pagina con preview "pesado" expone un boton "Show preview" arriba y abre
+-- el preview en una ventana flotante a la izquierda del config window. Asi se
+-- libera el espacio vertical de la pagina sin perder el feedback visual.
+local function BuildPreviewPopupFrame(name, w, h)
+    local f = CreateFrame("Frame", name, UIParent, "BackdropTemplate")
+    f:SetSize(w or 320, h or 320)
+    f:SetFrameStrata("DIALOG")
+    f:SetMovable(true); f:EnableMouse(true); f:SetClampedToScreen(true)
+    f:Hide()
+    PanelBackdrop(f)
+
+    -- Title bar (drag region)
+    local tb = CreateFrame("Frame", nil, f); tb:SetHeight(24)
+    tb:SetPoint("TOPLEFT", 0, 0); tb:SetPoint("TOPRIGHT", -24, 0)
+    tb:EnableMouse(true); tb:RegisterForDrag("LeftButton")
+    tb:SetScript("OnDragStart", function() f:StartMoving() end)
+    tb:SetScript("OnDragStop", function() f:StopMovingOrSizing() end)
+    local tt = tb:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    tt:SetPoint("LEFT", 10, 0)
+    tt:SetTextColor(C_ACCENT.r, C_ACCENT.g, C_ACCENT.b)
+    f.title = tt
+
+    -- Close button (estilo flat, igual al del main config window)
+    local cb = CreateFrame("Button", nil, f, "BackdropTemplate")
+    cb:SetSize(18, 18); cb:SetPoint("TOPRIGHT", -4, -3)
+    cb:SetFrameLevel(tb:GetFrameLevel() + 1)
+    ElementBackdrop(cb)
+    local cbX = cb:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    cbX:SetPoint("CENTER"); cbX:SetText("x")
+    cbX:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+    cb:SetScript("OnEnter", function(s) s:SetBackdropBorderColor(1, 0.3, 0.3, 1); cbX:SetTextColor(1, 0.3, 0.3) end)
+    cb:SetScript("OnLeave", function(s) s:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5); cbX:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b) end)
+    cb:SetScript("OnClick", function() f:Hide() end)
+
+    -- Inner panel que hostea el preview real
+    local inner = CreateFrame("Frame", nil, f)
+    inner:SetPoint("TOPLEFT", 6, -28); inner:SetPoint("BOTTOMRIGHT", -6, 6)
+    SubPanelBackdrop(inner, 0.25)
+    f.inner = inner
+
+    -- ESC cierra (sin UISpecialFrames para no chocar con el del main window)
+    f:EnableKeyboard(true); f:SetPropagateKeyboardInput(true)
+    f:SetScript("OnKeyDown", function(self, key)
+        if key == "ESCAPE" then self:SetPropagateKeyboardInput(false); self:Hide()
+        else self:SetPropagateKeyboardInput(true) end
+    end)
+
+    return f
+end
+
+-- AnchorAndShowPreviewPopup(popup): garantiza UN solo preview activo (si hay
+-- otro abierto lo oculta) y hereda la posicion del popup anterior — sea que el
+-- usuario lo cerro o que cambio de menu — asi la ventana "se transforma" en
+-- lugar de spawnear otra en una posicion sorpresa. Primer Show absoluto ancla
+-- TOPLEFT a TOPRIGHT del config window (lado derecho).
+local activePreviewPopup
+local function AnchorAndShowPreviewPopup(popup)
+    local inheritFrom
+    if activePreviewPopup and activePreviewPopup ~= popup then
+        inheritFrom = activePreviewPopup
+        if activePreviewPopup:IsShown() then activePreviewPopup:Hide() end
+    end
+    if inheritFrom then
+        -- Tomamos solo el primer SetPoint; nuestros popups siempre tienen un
+        -- unico anchor (no usan TOPLEFT+BOTTOMRIGHT pair).
+        local pt, rel, relPt, x, y = inheritFrom:GetPoint(1)
+        if pt then
+            popup:ClearAllPoints()
+            popup:SetPoint(pt, rel, relPt, x, y)
+            popup.positioned = true
+        end
+    end
+    if not popup.positioned then
+        popup:ClearAllPoints()
+        if mainWindow then
+            popup:SetPoint("TOPLEFT", mainWindow, "TOPRIGHT", 8, 0)
+        else
+            popup:SetPoint("CENTER")
+        end
+        popup.positioned = true
+    end
+    activePreviewPopup = popup
+    popup:Show()
+end
+
+-- Cursor Ring popup: singleton con focus dinamico (Ring/Cast/Dot). El preview
+-- interno se reconstruye solo cuando cambia el focus para no resetear la
+-- animacion al re-mostrar la misma sub-tab.
+local cursorRingPreviewPopup
+local function GetCursorRingPreviewPopup()
+    if cursorRingPreviewPopup then return cursorRingPreviewPopup end
+    local f = BuildPreviewPopupFrame("HNZHealingToolsCursorRingPreviewPopup", 320, 320)
+    f.currentFocus = nil
+    f.preview = nil
+    function f:ShowWithFocus(focus, label)
+        self.title:SetText(ns.L["Live preview"] .. " — " .. (label or focus))
+        if self.currentFocus ~= focus then
+            if self.preview and self.preview.container then
+                self.preview.container:Hide()
+                self.preview.container:SetParent(nil)
+            end
+            self.preview = ns:CreateCursorRingPreview(self.inner, focus)
+            self.preview.container:SetAllPoints(self.inner)
+            self.currentFocus = focus
+        end
+        AnchorAndShowPreviewPopup(self)
+    end
+    cursorRingPreviewPopup = f
+    return f
+end
+
+-- Generic single-preview popup opener factory: build (inner) -> preview-object
+-- con campo .container (o nil si no aplica). Devuelve un opener que crea el
+-- popup lazy y lo muestra anclado a la izquierda del config window.
+local function MakeSimplePreviewOpener(name, title, w, h, createPreview)
+    local popup
+    return function()
+        if not popup then
+            popup = BuildPreviewPopupFrame(name, w, h)
+            popup.title:SetText(title)
+            local pv = createPreview(popup.inner)
+            if pv and pv.container then pv.container:SetAllPoints(popup.inner) end
+        end
+        AnchorAndShowPreviewPopup(popup)
+    end
+end
+
+local OpenCursorDisplayPreview, OpenRingPreview, OpenCooldownPulsePreview
+local function GetCursorDisplayPreviewOpener()
+    if not OpenCursorDisplayPreview then
+        OpenCursorDisplayPreview = MakeSimplePreviewOpener(
+            "HNZHealingToolsCursorDisplayPreviewPopup",
+            ns.L["Live preview"] .. " — " .. ns.L["Cursor"],
+            420, 280,
+            function(inner) return ns:CreateCursorDisplayPreview(inner) end)
+    end
+    return OpenCursorDisplayPreview
+end
+local function GetRingPreviewOpener()
+    if not OpenRingPreview then
+        OpenRingPreview = MakeSimplePreviewOpener(
+            "HNZHealingToolsRingPreviewPopup",
+            ns.L["Live preview"] .. " — " .. ns.L["Ring"],
+            420, 280,
+            function(inner) return ns:CreateRingPreview(inner) end)
+    end
+    return OpenRingPreview
+end
+local function GetCooldownPulsePreviewOpener()
+    if not OpenCooldownPulsePreview then
+        OpenCooldownPulsePreview = MakeSimplePreviewOpener(
+            "HNZHealingToolsCooldownPulsePreviewPopup",
+            ns.L["Live preview"] .. " — " .. ns.L["Pulse"],
+            420, 280,
+            function(inner) return ns:CreateCooldownPulsePreview(inner) end)
+    end
+    return OpenCooldownPulsePreview
+end
 
 local allSliders, allCheckboxes = {}, {}
 local spellListC, cursorAuraListC, ringAuraListC
@@ -2731,7 +2955,10 @@ end
 -- Page 4: Cursor Settings
 local function BuildCursorSettingsPage(p)
     local C1,C2=20,340; local y=-8
-    local hd=H(p,ns.L["Cursor Display Settings"]); hd:SetPoint("TOPLEFT",8,y); y=y-28
+    local hd=H(p,ns.L["Cursor Display Settings"]); hd:SetPoint("TOPLEFT",8,y)
+    local prvBtn=Btn(p, ns.L["Show preview"], 120, 22); prvBtn:SetPoint("TOPRIGHT", -16, -8)
+    prvBtn:SetScript("OnClick", function() GetCursorDisplayPreviewOpener()() end)
+    y=y-28
 
     -- Enable + visibility dropdown en la misma linea, Enable primero (regla
     -- del usuario para layout consistente entre todas las paginas).
@@ -2771,24 +2998,15 @@ local function BuildCursorSettingsPage(p)
     }
     for _,d in ipairs(defs2) do local s=CreateSlider(p,d[1],d[2],d[3],d[4],d[5],d[6]); s:SetPoint("TOPLEFT",C2,c2y); table.insert(allSliders,s); c2y=c2y-48 end
 
-    -- Live preview: cursor virtual con grid de iconos sample (3 spells + 2 auras).
-    local previewY = math.min(c1y, c2y) - 12
-    local ph2 = SubH(p, ns.L["Live preview"]); ph2:SetPoint("TOPLEFT", C1, previewY); previewY = previewY - 20
-
-    local previewBox = CreateFrame("Frame", nil, p, "BackdropTemplate")
-    previewBox:SetPoint("TOPLEFT", C1, previewY)
-    previewBox:SetPoint("TOPRIGHT", p, "TOPRIGHT", -16, previewY)
-    previewBox:SetHeight(240)
-    SubPanelBackdrop(previewBox, 0.25)
-
-    local preview = ns:CreateCursorDisplayPreview(previewBox)
-    preview.container:SetAllPoints(previewBox)
 end
 
 -- Page 5: Ring Settings
 local function BuildRingSettingsPage(p)
     local C1,C2=20,340; local y=-8
-    local hd=H(p,ns.L["Ring Display Settings"]); hd:SetPoint("TOPLEFT",8,y); y=y-28
+    local hd=H(p,ns.L["Ring Display Settings"]); hd:SetPoint("TOPLEFT",8,y)
+    local prvBtn=Btn(p, ns.L["Show preview"], 120, 22); prvBtn:SetPoint("TOPRIGHT", -16, -8)
+    prvBtn:SetScript("OnClick", function() GetRingPreviewOpener()() end)
+    y=y-28
 
     -- Enable + visibility dropdown en la misma linea, Enable primero.
     local ec=CreateCheckbox(p,ns.L["Enable ring display"],function() return ns.db.ringDisplay.enabled end,function(v) ns.db.ringDisplay.enabled=v; ns:RefreshRingDisplay() end)
@@ -2830,20 +3048,6 @@ local function BuildRingSettingsPage(p)
     }
     for _,d in ipairs(defs2) do local s=CreateSlider(p,d[1],d[2],d[3],d[4],d[5],d[6]); s:SetPoint("TOPLEFT",C2,c2y); table.insert(allSliders,s); c2y=c2y-48 end
 
-    -- Live preview: 3 anillos de muestra renderizados con el ringDisplay actual.
-    -- Reacciona automaticamente a cualquier slider via ns._notifyRingPreviews()
-    -- disparado desde Rebuild/RefreshRingDisplay.
-    local previewY = math.min(c1y, c2y) - 12
-    local ph2 = SubH(p, ns.L["Live preview"]); ph2:SetPoint("TOPLEFT", C1, previewY); previewY = previewY - 20
-
-    local previewBox = CreateFrame("Frame", nil, p, "BackdropTemplate")
-    previewBox:SetPoint("TOPLEFT", C1, previewY)
-    previewBox:SetPoint("TOPRIGHT", p, "TOPRIGHT", -16, previewY)
-    previewBox:SetHeight(240)
-    SubPanelBackdrop(previewBox, 0.25)
-
-    local preview = ns:CreateRingPreview(previewBox)
-    preview.container:SetAllPoints(previewBox)
 end
 
 -- ============================================================
@@ -3039,7 +3243,10 @@ end
 
 local function BuildCooldownPulsePage(p)
     local C1,C2=20,340; local y=-8
-    local hd=H(p,ns.L["Pulse Display Settings"]); hd:SetPoint("TOPLEFT",8,y); y=y-28
+    local hd=H(p,ns.L["Pulse Display Settings"]); hd:SetPoint("TOPLEFT",8,y)
+    local prvBtn=Btn(p, ns.L["Show preview"], 120, 22); prvBtn:SetPoint("TOPRIGHT", -16, -8)
+    prvBtn:SetScript("OnClick", function() GetCooldownPulsePreviewOpener()() end)
+    y=y-28
 
     -- Enable + visibility dropdown misma linea, primero (regla del usuario para
     -- layout consistente entre todas las paginas con feature toggle + combat-gate).
@@ -3086,19 +3293,6 @@ local function BuildCooldownPulsePage(p)
     local testBtn=Btn(p,ns.L["Test pulse"],130,24); testBtn:SetPoint("LEFT",anchorBtn,"RIGHT",10,0)
     testBtn:SetScript("OnClick",function() ns:TestCooldownPulse() end)
 
-    -- Live preview: pulse de muestra que se repite usando iconSize/holdDuration/
-    -- opacity actuales. Reacciona a sliders via ns._notifyCooldownPulsePreviews.
-    local previewY = btnY - 36
-    local ph2 = SubH(p, ns.L["Live preview"]); ph2:SetPoint("TOPLEFT", C1, previewY); previewY = previewY - 20
-
-    local previewBox = CreateFrame("Frame", nil, p, "BackdropTemplate")
-    previewBox:SetPoint("TOPLEFT", C1, previewY)
-    previewBox:SetPoint("TOPRIGHT", p, "TOPRIGHT", -16, previewY)
-    previewBox:SetHeight(240)
-    SubPanelBackdrop(previewBox, 0.25)
-
-    local preview = ns:CreateCooldownPulsePreview(previewBox)
-    preview.container:SetAllPoints(previewBox)
 end
 
 -- Page 7: Cursor Ring (anillo decorativo siguiendo al raton)
@@ -3107,10 +3301,15 @@ end
 -- Dividido en 3 sub-tabs (Ring / Cast / Dot) para que cada feature tenga su
 -- propio enable y ajustes sin solapar layouts en una sola pagina larga.
 
+-- (Helpers de Preview popup viven al principio del bloque Page Builders ~L2480.)
+
 -- Sub-tab 1: anillo decorativo principal (size, position, texture, color, combat).
 local function BuildCursorRingMainPage(p)
     local C1,C2=20,340; local y=-8
-    local hd=H(p,ns.L["Cursor Ring"]); hd:SetPoint("TOPLEFT",8,y); y=y-28
+    local hd=H(p,ns.L["Cursor Ring"]); hd:SetPoint("TOPLEFT",8,y)
+    local prvBtn=Btn(p, ns.L["Show preview"], 120, 22); prvBtn:SetPoint("TOPRIGHT", -16, -8)
+    prvBtn:SetScript("OnClick", function() GetCursorRingPreviewPopup():ShowWithFocus("ring", ns.L["Ring"]) end)
+    y=y-28
 
     -- Enable + visibility dropdown en la misma linea, Enable primero (regla
     -- del usuario para layout consistente entre todas las paginas).
@@ -3156,26 +3355,15 @@ local function BuildCursorRingMainPage(p)
         function() return ns.db.cursorRing.useClassColor end,
         function(v) ns.db.cursorRing.useClassColor=v; ns:RefreshCursorRing() end)
     cc:SetPoint("TOPLEFT",C1,by); table.insert(allCheckboxes,cc)
-
-    -- Live preview: cursor virtual moviendose con ring + cast + dot + FX. En
-    -- esta sub-tab el ring se ve full opacity y cast/dot al 30% (focus="ring").
-    local previewY = by - 36
-    local ph2 = SubH(p, ns.L["Live preview"]); ph2:SetPoint("TOPLEFT", C1, previewY); previewY = previewY - 20
-
-    local previewBox = CreateFrame("Frame", nil, p, "BackdropTemplate")
-    previewBox:SetPoint("TOPLEFT", C1, previewY)
-    previewBox:SetPoint("TOPRIGHT", p, "TOPRIGHT", -16, previewY)
-    previewBox:SetHeight(240)
-    SubPanelBackdrop(previewBox, 0.25)
-
-    local preview = ns:CreateCursorRingPreview(previewBox, "ring")
-    preview.container:SetAllPoints(previewBox)
 end
 
 -- Sub-tab 2: cast progress ring.
 local function BuildCursorRingCastPage(p)
     local C1,C2=20,340; local y=-8
-    local hd=H(p,ns.L["Cast progress ring"]); hd:SetPoint("TOPLEFT",8,y); y=y-28
+    local hd=H(p,ns.L["Cast progress ring"]); hd:SetPoint("TOPLEFT",8,y)
+    local prvBtn=Btn(p, ns.L["Show preview"], 120, 22); prvBtn:SetPoint("TOPRIGHT", -16, -8)
+    prvBtn:SetScript("OnClick", function() GetCursorRingPreviewPopup():ShowWithFocus("cast", ns.L["Cast"]) end)
+    y=y-28
 
     ns.db.cursorRing.cast = ns.db.cursorRing.cast or {}
     local cast = ns.db.cursorRing.cast
@@ -3219,24 +3407,15 @@ local function BuildCursorRingCastPage(p)
         function(v) cast.direction=v; ns:RefreshCursorRing() end)
     dirDD:SetPoint("TOPLEFT", dirLbl, "BOTTOMLEFT", 0, -4)
 
-    -- Live preview: en esta sub-tab el cast se ve full opacity, ring/dot al 30%.
-    local previewY = y - 60
-    local ph2 = SubH(p, ns.L["Live preview"]); ph2:SetPoint("TOPLEFT", C1, previewY); previewY = previewY - 20
-
-    local previewBox = CreateFrame("Frame", nil, p, "BackdropTemplate")
-    previewBox:SetPoint("TOPLEFT", C1, previewY)
-    previewBox:SetPoint("TOPRIGHT", p, "TOPRIGHT", -16, previewY)
-    previewBox:SetHeight(240)
-    SubPanelBackdrop(previewBox, 0.25)
-
-    local preview = ns:CreateCursorRingPreview(previewBox, "cast")
-    preview.container:SetAllPoints(previewBox)
 end
 
 -- Sub-tab 3: punto central.
 local function BuildCursorRingDotPage(p)
     local C1,C2=20,340; local y=-8
-    local hd=H(p,ns.L["Center dot"]); hd:SetPoint("TOPLEFT",8,y); y=y-28
+    local hd=H(p,ns.L["Center dot"]); hd:SetPoint("TOPLEFT",8,y)
+    local prvBtn=Btn(p, ns.L["Show preview"], 120, 22); prvBtn:SetPoint("TOPRIGHT", -16, -8)
+    prvBtn:SetScript("OnClick", function() GetCursorRingPreviewPopup():ShowWithFocus("dot", ns.L["Dot"]) end)
+    y=y-28
 
     ns.db.cursorRing.dot = ns.db.cursorRing.dot or {}
     local dot = ns.db.cursorRing.dot
@@ -3373,18 +3552,6 @@ local function BuildCursorRingDotPage(p)
         function(v) dot.trailVisibility = v end)
     trailVisDD:SetPoint("LEFT", tvl, "RIGHT", 8, 0)
 
-    -- Live preview: en esta sub-tab el dot + FX se ven full opacity, ring/cast al 30%.
-    local previewY = y - 40
-    local ph2 = SubH(p, ns.L["Live preview"]); ph2:SetPoint("TOPLEFT", C1, previewY); previewY = previewY - 20
-
-    local previewBox = CreateFrame("Frame", nil, p, "BackdropTemplate")
-    previewBox:SetPoint("TOPLEFT", C1, previewY)
-    previewBox:SetPoint("TOPRIGHT", p, "TOPRIGHT", -16, previewY)
-    previewBox:SetHeight(240)
-    SubPanelBackdrop(previewBox, 0.25)
-
-    local preview = ns:CreateCursorRingPreview(previewBox, "dot")
-    preview.container:SetAllPoints(previewBox)
 end
 
 -- MRT Timeline Reminders: dos sub-tabs.
@@ -3488,6 +3655,91 @@ local function BuildMrtConfigPage(p)
         local snd = sndPick:GetSoundName() or "Default"
         if ns.PlayAuraSound then ns.PlayAuraSound(snd, ns.db.mrtTimeline.soundChannel or "Master") end
     end)
+end
+
+-- Macros / public API help page. Pagina exclusivamente documentativa: explica
+-- como configurar un Trigger Key en una entry y dispararla desde una macro o
+-- desde otro addon. No persiste nada — solo texto + ejemplos copiables.
+local function BuildMacrosPage(p)
+    local C1 = 16
+    local W = 540  -- ancho de parrafos (config window MIN_W=720 menos sidebar+padding deja ~560 visible)
+    local y = -8
+
+    -- Helpers que auto-avanzan y segun la altura real del contenido. SetWidth
+    -- antes de SetText hace que GetStringHeight devuelva la altura post-wrap,
+    -- asi que parrafos multi-linea no se solapan con el siguiente elemento.
+    local function Header(text)
+        local h = H(p, text); h:SetPoint("TOPLEFT", 8, y)
+        y = y - math.ceil(h:GetStringHeight()) - 10
+    end
+
+    local function Para(text, gap)
+        local fs = p:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        fs:SetPoint("TOPLEFT", C1, y)
+        fs:SetWidth(W); fs:SetJustifyH("LEFT"); fs:SetJustifyV("TOP")
+        fs:SetText(text)
+        fs:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+        y = y - math.ceil(fs:GetStringHeight()) - (gap or 4)
+        return fs
+    end
+
+    -- Code line: editbox readonly pre-filled con el snippet. El usuario puede
+    -- clickear → selecciona todo → Ctrl+C. ElementBackdrop le da aspecto de
+    -- bloque de codigo.
+    local function CodeLine(text, w, gap)
+        local cb = CreateFrame("EditBox", nil, p, "BackdropTemplate")
+        cb:SetSize(w or 520, 22)
+        cb:SetPoint("TOPLEFT", C1 + 8, y)
+        cb:SetAutoFocus(false)
+        cb:SetFontObject("GameFontHighlight")
+        cb:SetTextInsets(8, 8, 0, 0)
+        ElementBackdrop(cb)
+        cb:SetText(text)
+        cb:SetCursorPosition(0)
+        cb:SetTextColor(0.7, 1.0, 0.7)
+        -- Anti-edit: descartar cualquier cambio del usuario manteniendo el seleccionable.
+        cb:SetScript("OnTextChanged", function(self, userInput) if userInput then self:SetText(text); self:HighlightText(0, 0) end end)
+        cb:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+        cb:SetScript("OnEditFocusGained", function(self) self:HighlightText() end)
+        cb:SetScript("OnMouseUp", function(self) self:HighlightText() end)
+        y = y - 22 - (gap or 6)
+        return cb
+    end
+
+    local function Spacer(h)
+        y = y - (h or 8)
+    end
+
+    Header(ns.L["Trigger displays from macros"])
+    Para(ns.L["You can fire any aura or pulse from a macro, keybind, or another addon — without needing the actual aura/cooldown to trigger. Useful for one-shot visual signals (panic ring, cooldown reminder, callout from a partner addon)."], 14)
+
+    Header(ns.L["1. Where you can set a Trigger key"])
+    Para(ns.L["Open the editor of any of these and fill in the \"Trigger key\" field:"])
+    Para(ns.L["  • Cursor Aura — fires the aura's icon at cursor for its Duration."])
+    Para(ns.L["  • Ring Aura — fires the colored ring around your character for its Duration."])
+    Para(ns.L["  • Cursor Item — fires the central pulse with the item's icon + optional sound."])
+    Para(ns.L["  • Pulse Spell / Pulse Aura / Pulse Item — fires the central screen pulse + optional sound."], 12)
+
+    Header(ns.L["2. Fire it"])
+    Para(ns.L["From a chat message or macro line:"])
+    CodeLine("/hht trigger panic", 320)
+    Para(ns.L["From Lua (other addons, /run, WeakAuras custom code):"])
+    CodeLine("/run HNZHealingTools.Trigger(\"panic\")", 420, 12)
+
+    Header(ns.L["Example: cast + trigger together"])
+    Para(ns.L["Combine a real cast with a visual trigger in one macro:"])
+    CodeLine("#showtooltip", 520, 2)
+    CodeLine("/cast Pain Suppression", 520, 2)
+    CodeLine("/hht trigger ohshit", 520, 12)
+
+    Header(ns.L["Tips"])
+    Para(ns.L["  • Multiple entries can share the same trigger key — they all fire at once (e.g. one key can show a Ring Aura + play a Pulse simultaneously)."])
+    Para(ns.L["  • Trigger keys are case-insensitive. \"Panic\" and \"panic\" match the same entries."])
+    Para(ns.L["  • Aura entries (Cursor / Ring) require Duration > 0 — without a duration there's no way to know when the visual should disappear."])
+    Para(ns.L["  • Pulse entries fire immediately and the animation has its own length (configured globally in Pulse → Config)."])
+    Para(ns.L["  • HNZHealingTools.Trigger(key) returns the number of entries that matched (0 = no entries have that key)."])
+    Para(ns.L["  • Combat-safe: trigger keys work during combat lockdown."])
+    Spacer(12)
 end
 
 -- General settings: ajustes account-wide que no pertenecen a un perfil. Hoy
@@ -4119,8 +4371,8 @@ end
 -- ============================================================
 -- Main Window
 -- ============================================================
-
-local mainWindow
+-- `mainWindow` viene forward-declarado mas arriba (junto al popup de preview).
+-- Aqui solo asignamos en CreateConfigWindow.
 local pages, menuButtons = {}, {}
 
 function ns:CreateConfigWindow()
@@ -4268,6 +4520,7 @@ function ns:CreateConfigWindow()
             {name=ns.L["Encounters"], builder=BuildMrtEncountersPage},
             {name=ns.L["Config"],     builder=BuildMrtConfigPage},
         }},
+        {name=ns.L["Macros"],        builder=BuildMacrosPage},
         {name=ns.L["General"],       builder=BuildGeneralPage},
         {name=ns.L["Profiles"],      builder=BuildProfilesPage},
     }

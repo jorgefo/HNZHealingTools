@@ -34,6 +34,75 @@ local function GetCdmFrameSpellID(frame)
     return ids[#ids] -- prefer last linked (usually the buff ID), fall back to primary
 end
 
+-- SecureNumber siphon: en combate cdmAuraInstance.applications llega como
+-- SecureNumber (ToPublic devuelve nil). Pero FontString:SetText acepta
+-- SecureNumber y renderiza el valor a texto plano; GetText luego devuelve un
+-- string parseable. Usamos un FontString privado oculto como "sink". El SetText
+-- esta envuelto en pcall por si la API cambia.
+local secureNumberSink
+local function GetSecureNumberSink()
+    if not secureNumberSink then
+        local host = CreateFrame("Frame", nil, UIParent)
+        host:Hide()
+        secureNumberSink = host:CreateFontString(nil, "BACKGROUND", "GameFontNormal")
+    end
+    return secureNumberSink
+end
+
+local function SiphonNumber(val)
+    if val == nil then return nil end
+    -- Path A: si ya es publico, evitamos el round-trip por el sink.
+    local pub = ns.ToPublic and ns.ToPublic(val)
+    if type(pub) == "number" then return pub end
+    -- Path B: SecureNumber → SetText (acepta SN) → GetText → tonumber.
+    local fs = GetSecureNumberSink()
+    local ok = pcall(fs.SetText, fs, val)
+    if not ok then return nil end
+    return tonumber(fs:GetText() or "")
+end
+
+-- Lee la cantidad de stacks de un cdm frame post-mixin-update. Blizzard ya pinto
+-- el Count FontString via SetText(applications) — incluso si el valor es
+-- SecureNumber, el FontString almacena el render como string que podemos parsear.
+-- Devuelve number o nil. Tolerante a layouts (CDM tiene varios templates).
+local function ReadCdmFrameStacks(frame, cdmAuraInstance)
+    -- Path 1: campo directo via siphon (cubre SecureNumber en combate).
+    if cdmAuraInstance then
+        local n = SiphonNumber(cdmAuraInstance.applications)
+        if n and n > 0 then return n end
+    end
+    -- Path 2: FontString que Blizzard ya pinto. Probar nombres comunes.
+    local widgets = { frame.Count, frame.count, frame.ApplicationsText, frame.StackCount, frame.Charges }
+    if frame.CountFrame then
+        table.insert(widgets, frame.CountFrame.Count)
+        table.insert(widgets, frame.CountFrame)
+    end
+    for _, w in ipairs(widgets) do
+        if w and type(w.GetText) == "function" then
+            local n = tonumber(w:GetText())
+            if n and n > 0 then return n end
+        end
+    end
+    -- Path 3: ultimo recurso, enumerar regiones del frame y buscar el primer
+    -- FontString con texto numerico. Heuristica: el Count widget suele ser
+    -- pequenio (8-16 px de fontHeight). Para reducir falsos positivos con el
+    -- timer del cooldown, prefiero filtrar por texto que sea solo digitos (sin
+    -- ":" ni "." que aparecen en duraciones tipo "1:30" / "0.5s").
+    if type(frame.GetRegions) == "function" then
+        local regions = { frame:GetRegions() }
+        for _, r in ipairs(regions) do
+            if r and r.GetObjectType and r:GetObjectType() == "FontString" then
+                local txt = r:GetText()
+                if txt and txt:match("^%d+$") then
+                    local n = tonumber(txt)
+                    if n and n > 0 then return n end
+                end
+            end
+        end
+    end
+    return nil
+end
+
 local function HookCdmFrame(frame)
     if not frame or cdmHookedFrames[frame] then return end
     if type(frame.SetAuraInstanceInfo) ~= "function" then return end
@@ -53,6 +122,10 @@ local function HookCdmFrame(frame)
                 appliedAt = GetTime(),
             }
         end
+        -- Cada SetAuraInstanceInfo refresca el stack count (mismo evento Blizzard
+        -- usa para repintar su Count widget). Capturamos cada vez por si el
+        -- conteo cambio entre ticks de la aura.
+        cdmData[unit][instanceID].stacks = ReadCdmFrameStacks(self, cdmAuraInstance)
         ns:MarkAuraDirty()
     end)
 end
@@ -69,8 +142,16 @@ local function CaptureCdmFrameState(frame)
                 spellID = spellIDs[#spellIDs],
                 spellIDs = spellIDs,
                 appliedAt = GetTime(),
+                stacks = ReadCdmFrameStacks(frame, nil),
             }
             ns:MarkAuraDirty()
+        else
+            -- Refresh stacks on existing entry: frame ya tiene Count actualizado.
+            local s = ReadCdmFrameStacks(frame, nil)
+            if s and s ~= cdmData[unit][instanceID].stacks then
+                cdmData[unit][instanceID].stacks = s
+                ns:MarkAuraDirty()
+            end
         end
     end
 end
@@ -145,6 +226,7 @@ end
 local function FindCdmAuraData(unit, spellID)
     local data = cdmData[unit]
     if not data then return nil, nil end
+    local restrictedInfo
     for instanceID, info in pairs(data) do
         local match = (info.spellID == spellID)
         if not match and info.spellIDs then
@@ -152,13 +234,20 @@ local function FindCdmAuraData(unit, spellID)
                 if id == spellID then match = true; break end
             end
         end
-        if match and C_UnitAuras.GetAuraDataByAuraInstanceID then
-            local auraData = C_UnitAuras.GetAuraDataByAuraInstanceID(unit, instanceID)
-            if auraData then return auraData, info end
-            data[instanceID] = nil
+        if match then
+            if C_UnitAuras.GetAuraDataByAuraInstanceID then
+                local auraData = C_UnitAuras.GetAuraDataByAuraInstanceID(unit, instanceID)
+                if auraData then return auraData, info end
+            end
+            -- "Fully restricted": Blizzard CDM nos pinto el aura (capturamos
+            -- spellID + appliedAt + stacks via FontString), pero GetAuraDataByAuraInstanceID
+            -- nos devuelve nil. Conservamos `info` como restrictedInfo para que
+            -- GetAuraStatus pueda sintetizar ACTIVE desde el dato del frame.
+            -- La eviccion real ocurre via UNIT_AURA removedAuraInstanceIDs.
+            restrictedInfo = info
         end
     end
-    return nil, nil
+    return nil, restrictedInfo
 end
 
 -- Used by Config UI to decide whether to flag an aura with the !CDM badge.
@@ -403,6 +492,11 @@ local function FindAuraBySpellID(unit, spellID, filter)
     -- 1. CDM cache (works in combat for auras the Blizzard Cooldown Manager tracks)
     local cdmAura, cdmInfo = FindCdmAuraData(unit, spellID)
     if cdmAura then return cdmAura, cdmInfo end
+    -- Propaga el cdmInfo "restricted" (aura visible en CDM pero invisible al
+    -- addon via GetAuraDataByAuraInstanceID). Si ninguno de los paths siguientes
+    -- consigue auraData, lo devolvemos al caller para que sintetice ACTIVE con
+    -- stacks + appliedAt capturados desde el frame de Blizzard.
+    local restrictedCdmInfo = cdmInfo
     -- 2. Our event-driven cache
     local cachedID = GetCachedAuraInstanceID(unit, spellID)
     if cachedID and C_UnitAuras.GetAuraDataByAuraInstanceID then
@@ -476,6 +570,11 @@ local function FindAuraBySpellID(unit, spellID, filter)
             until not cont
         end
     end
+    -- Ninguno de los 6 paths consiguio auraData. Si CDM tiene info "restricted"
+    -- para este spellID (el viewer de Blizzard sigue mostrando la aura, pero el
+    -- API esta bloqueado para addons), devolvemos `nil, info` para que
+    -- GetAuraStatus pueda sintetizar ACTIVE con stacks + appliedAt.
+    if restrictedCdmInfo then return nil, restrictedCdmInfo end
     return nil
 end
 
@@ -543,6 +642,86 @@ local function FireManualTriggerByID(kind, id)
     check(ns.db.cursorAuras)
     check(ns.db.ringAuras)
 end
+
+-- External trigger: el usuario pone una `triggerKey` (string) en la entry y dispara
+-- desde una macro con /hht trigger <key> o desde otro addon via HNZHealingTools.Trigger(key).
+-- Match exacto case-insensitive sobre entry.triggerKey. Cubre varios target types:
+--   * cursorAuras / ringAuras: MarkManualTrigger -> GetAuraStatus sintetiza ACTIVE
+--     durante manualDuration s. Si la entry tiene cdPulse, dispara tambien pulse.
+--   * pulseSpells / pulseAuras: ShowPulse directo con icon/name/sound de la entry.
+--   * cursorSpells (items, con .itemID): ShowPulse usando icon+name del item +
+--     cdPulseSound de la entry. Para Cursor Spell normal (con .spellID) no
+--     hacemos nada — un spell cursor no tiene representacion natural "pulse".
+-- Devuelve count de matches (0 = ninguna entry tiene esa key).
+local function FireExternalTrigger(key)
+    if not (key and ns.db) then return 0 end
+    local needle = tostring(key):lower()
+    if needle == "" then return 0 end
+    local count = 0
+
+    local function matches(e)
+        return e.triggerKey and tostring(e.triggerKey):lower() == needle
+    end
+
+    -- 1. Aura entries (cursor/ring): marca ACTIVE via manual trigger fallback.
+    --    Si tienen cdPulse, ademas dispara el pulse central para mantener paridad
+    --    con el flujo real (CLEU SPELL_AURA_APPLIED -> ShowAuraPulseIfEnabled).
+    local function checkAura(list)
+        for _, e in ipairs(list or {}) do
+            if matches(e) and e.spellID then
+                MarkManualTrigger(e.unit or "player", e.spellID)
+                if e.cdPulse and ns.ShowPulse then
+                    local info = C_Spell.GetSpellInfo(e.spellID)
+                    ns:ShowPulse(info and info.iconID or 134400, info and info.name or "", false, nil)
+                end
+                count = count + 1
+            end
+        end
+    end
+    checkAura(ns.db.cursorAuras)
+    checkAura(ns.db.ringAuras)
+
+    -- 2. Pulse entries: ShowPulse directo. Spells/items conviven en pulseSpells;
+    --    distinguimos por presencia de itemID vs spellID para resolver icon/name.
+    if ns.ShowPulse then
+        for _, e in ipairs(ns.db.pulseSpells or {}) do
+            if matches(e) and (e.enabled ~= false) then
+                local icon, name = 134400, ""
+                if e.spellID then
+                    local info = C_Spell.GetSpellInfo(e.spellID)
+                    icon = (info and info.iconID) or icon
+                    name = (info and info.name) or ""
+                elseif e.itemID then
+                    if ns.GetItemDisplayInfo then name = ns.GetItemDisplayInfo(e.itemID) or "" end
+                    if C_Item and C_Item.GetItemIconByID then icon = C_Item.GetItemIconByID(e.itemID) or icon end
+                end
+                ns:ShowPulse(icon, name, e.soundEnabled, e.soundName, e.soundChannel)
+                count = count + 1
+            end
+        end
+        for _, e in ipairs(ns.db.pulseAuras or {}) do
+            if matches(e) and (e.enabled ~= false) and e.spellID then
+                local info = C_Spell.GetSpellInfo(e.spellID)
+                ns:ShowPulse(info and info.iconID or 134400, info and info.name or "", e.soundEnabled, e.soundName, e.soundChannel)
+                count = count + 1
+            end
+        end
+        -- Cursor Items: viven en cursorSpells distinguidos por .itemID. Sin
+        -- soundChannel field — usamos default (nil = "Master") como el flujo
+        -- nativo de cdPulse hace.
+        for _, e in ipairs(ns.db.cursorSpells or {}) do
+            if matches(e) and (e.enabled ~= false) and e.itemID then
+                local name = ns.GetItemDisplayInfo and ns.GetItemDisplayInfo(e.itemID) or ""
+                local icon = (C_Item and C_Item.GetItemIconByID and C_Item.GetItemIconByID(e.itemID)) or 134400
+                ns:ShowPulse(icon, name, e.cdPulseSound, e.cdPulseSoundName, nil)
+                count = count + 1
+            end
+        end
+    end
+
+    return count
+end
+function ns:FireExternalTrigger(key) return FireExternalTrigger(key) end
 
 -- Resuelve el itemID disparado por UseInventoryItem/UseContainerItem y dispara.
 local function HandleItemUse(itemID)
@@ -837,6 +1016,38 @@ function ns:DebugAura(args)
     print(string.format("  CDM: hookedFrames=%d  matchingEntries=%d  cooldownViewerEnabled=%s",
         hooked, cdmHits,
         tostring(C_CVar and C_CVar.GetCVarBool and C_CVar.GetCVarBool("cooldownViewerEnabled") or "?")))
+    -- Si tenemos entry CDM, dump stacks capturados + matched FRAME children
+    -- para debuggear que widget tiene el contador.
+    if cdmData[unit] then
+        for iid, info in pairs(cdmData[unit]) do
+            if info.spellID == spellID or (info.spellIDs and (function() for _,id in ipairs(info.spellIDs) do if id == spellID then return true end end end)()) then
+                print(string.format("  CDM entry: instanceID=%d  stacks=%s  appliedAt=%.2f (age=%.2fs)",
+                    iid, tostring(info.stacks), info.appliedAt or 0, GetTime() - (info.appliedAt or 0)))
+                break
+            end
+        end
+    end
+    -- Frames hookeados que actualmente trackean este spellID: dump sus FontStrings.
+    local inCombat = InCombatLockdown and InCombatLockdown() or false
+    print(string.format("  inCombat=%s", tostring(inCombat)))
+    for frame in pairs(cdmHookedFrames) do
+        if frame.cooldownInfo and frame.cooldownID then
+            local ids = GetCdmFrameSpellIDs(frame)
+            local hits = false
+            for _, id in ipairs(ids) do if id == spellID then hits = true; break end end
+            if hits and type(frame.GetRegions) == "function" then
+                local regions = { frame:GetRegions() }
+                local fsList = {}
+                for _, r in ipairs(regions) do
+                    if r and r.GetObjectType and r:GetObjectType() == "FontString" then
+                        local t = r:GetText() or ""
+                        table.insert(fsList, "\""..t.."\"")
+                    end
+                end
+                print(string.format("  frame FontStrings: [%s]", table.concat(fsList, ", ")))
+            end
+        end
+    end
     -- Eligibilidad: si el aura no esta en cdmEligibleSpellIDs, ni siquiera el
     -- Cooldown Manager de Blizzard puede mostrarla — y nuestro hook depende de
     -- que CDM la muestre para capturarla. Si esta en eligible pero no en
@@ -917,8 +1128,9 @@ function ns:DebugAura(args)
     -- Check cdmInfo
     local _, cdmInfoChk = FindAuraBySpellID(unit, spellID, filter)
     if cdmInfoChk then
-        print(string.format("  cdmInfo.appliedAt=%.2f (age=%.2fs)",
-            cdmInfoChk.appliedAt or 0, GetTime() - (cdmInfoChk.appliedAt or 0)))
+        print(string.format("  cdmInfo.appliedAt=%.2f (age=%.2fs)  cdmInfo.stacks=%s",
+            cdmInfoChk.appliedAt or 0, GetTime() - (cdmInfoChk.appliedAt or 0),
+            tostring(cdmInfoChk.stacks)))
     else
         print("  cdmInfo: nil")
     end
@@ -975,7 +1187,16 @@ function ns:GetAuraStatus(spellID, unit, filter, manualDuration)
     local auraData, cdmInfo = FindAuraBySpellID(unit, spellID, filter)
     if auraData then
         result.status = "ACTIVE"
-        result.stacks = ns.ToPublic(auraData.applications) or 0
+        -- Stacks: para auras "fully restricted" (Mana Tea, etc.) auraData.applications
+        -- viene como SecureNumber. Cadena de fallback:
+        --   1. ToPublic (rapido, funciona out-of-combat)
+        --   2. SiphonNumber (SetText→GetText, funciona en combate con SecureNumber)
+        --   3. cdmInfo.stacks (capturado por el hook desde el frame de Blizzard)
+        --   4. 0 (binario o no-stacking)
+        local stacks = ns.ToPublic(auraData.applications)
+        if not stacks then stacks = SiphonNumber(auraData.applications) end
+        if not stacks and cdmInfo and cdmInfo.stacks then stacks = cdmInfo.stacks end
+        result.stacks = stacks or 0
         result.duration = ns.ToPublic(auraData.duration) or 0
         result.expirationTime = ns.ToPublic(auraData.expirationTime) or 0
 
@@ -1041,6 +1262,22 @@ function ns:GetAuraStatus(spellID, unit, filter, manualDuration)
             result.remaining = cleu.remaining or 0
             if cleu.duration and cleu.duration > 0 then
                 result.expirationTime = GetTime() + cleu.remaining
+            end
+        elseif cdmInfo then
+            -- CDM-only fallback: aura "fully restricted" — Blizzard la muestra en
+            -- su Cooldown Manager pero ningun API expone auraData al addon. Tenemos
+            -- stacks (leido del Count FontString) y appliedAt (timestamp del hook).
+            -- Duration: manualDuration > knownDuration > 0. Sin duration el icono
+            -- se muestra pero sin contador de tiempo (que es exactamente como CDM
+            -- pinta auras stacking sin timer fijo, e.g. Mana Tea).
+            result.status = "ACTIVE"
+            result.stacks = cdmInfo.stacks or 0
+            local dur = (manualDuration and manualDuration > 0) and manualDuration or knownAuraDurations[spellID]
+            if dur and dur > 0 and cdmInfo.appliedAt then
+                result.duration = dur
+                local rem = (cdmInfo.appliedAt + dur) - GetTime()
+                if rem > 0 then result.remaining = rem end
+                result.expirationTime = cdmInfo.appliedAt + dur
             end
         end
     end

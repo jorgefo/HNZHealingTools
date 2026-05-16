@@ -6,6 +6,28 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ---
 
+## [1.6.0] — 2026-05-16
+
+### Added
+- **Macro trigger system for displays**: every aura, pulse, and item editor now has a `Trigger key` field. Set any short string (e.g. `panic`), then fire from a macro with `/hht trigger panic` or from another addon via `HNZHealingTools.Trigger("panic")`. The same key can be set on multiple entries — one keybind fires them all at once. Internally Cursor/Ring auras reuse the existing manual-trigger machinery (synthesizes `ACTIVE` for `manualDuration` seconds via `MarkManualTrigger`); pulse entries (spells, auras, items) and cursor items dispatch `ShowPulse` directly with the entry's icon/name/sound.
+- **Public API namespace `_G.HNZHealingTools`**: minimal stable surface exposed for macros and other addons. Currently `.version` and `.Trigger(key) -> matchCount` are available. Future IPC features will extend this namespace.
+- **Macros help page** in the config sidebar (between MRT/NSRT and General): documents the trigger workflow with copy-pasteable code samples (read-only editboxes selectable + Ctrl+C). Sections: where to set a Trigger key, slash command, Lua API, macro example combining `/cast` + `/hht trigger`, tips on case-insensitivity and multi-entry firing.
+- **Floating preview popup**: every page that previously embedded a Live Preview block now has a `Show preview` button at the top-right of the header. Click opens a detachable window anchored to the right of the config window (TOPLEFT of popup against TOPRIGHT of config, 8px gap), reusable across pages via a singleton — switching from one Show preview to another hides the previous popup and inherits its position so the window "morphs" instead of spawning duplicates. Applied to Cursor Settings, Ring Settings, Cooldown Pulse, and the 3 Cursor Ring sub-tabs (Ring / Cast / Dot). Frees ~280px of vertical space per page.
+- **Stack count capture for fully-restricted auras (Cooldown Manager hook)**: auras like Mana Tea (115294) that Midnight hides from addon APIs but Blizzard's CDM viewer still tracks now show their stack count correctly. New `SiphonNumber` helper uses the same trick Blizzard's CDM internals use — `FontString:SetText(secureNumber)` accepts SecureNumbers and renders them as plain text, and `GetText` then returns a parseable string. Used both on the `cdmAuraInstance.applications` field (path 1) and on common Count widget names on the CDM frame as fallbacks (path 2 + region scan). `ReadCdmFrameStacks` is called from the `SetAuraInstanceInfo` hook so the captured count refreshes on every CDM update.
+- **CDM-only ACTIVE synthesis in `GetAuraStatus`**: when the 6 standard detection paths all return nil but the CDM hook has captured an instance for this spellID, the addon now synthesizes `status="ACTIVE"` with `stacks` from the hook and `appliedAt` for the timer (uses `manualDuration` configured by the user or the cached `knownDuration`). Previously these auras were treated as MISSING entirely; now the icon + stack count + (optional) timer render correctly.
+- **`/hht auradebug` enriched for combat diagnostics**: new lines `inCombat=true/false`, `CDM entry: instanceID=N stacks=N appliedAt=T (age=Ts)`, and a dump of every FontString text on the matching CDM frame (`frame FontStrings: ["3", "1:23"]`). The FontString dump is the smoking gun for finding the right widget when the siphon falls back to widget enumeration.
+
+### Changed
+- **`FindCdmAuraData` no longer evicts restricted entries**: when `C_UnitAuras.GetAuraDataByAuraInstanceID` returns nil (Midnight-restricted), the cdmInfo entry is kept around and returned as a `restrictedInfo` second return value. Eviction now only happens via the proper `UNIT_AURA.removedAuraInstanceIDs` event. This is what unlocks the CDM-only ACTIVE synthesis above.
+- **`FindAuraBySpellID` propagates restricted cdmInfo**: when none of the 6 detection paths succeed but a restricted CDM entry exists, the function returns `nil, restrictedCdmInfo` so the caller can choose to synthesize.
+- **`GetAuraStatus` stack resolution chain**: `ToPublic(applications)` → `SiphonNumber(applications)` → `cdmInfo.stacks` → 0. The SiphonNumber middle step is what makes in-combat stack capture work (SecureNumber's that `ToPublic` rejects via `pcall` are still readable through SetText/GetText).
+
+### Fixed
+- **Cursor Ring trigger key removed from UI and defaults**: an earlier draft of this release added a triggerKey/triggerDuration pair to `cursorRing` with a flash-and-sparkle effect. Pulled in favor of keeping the macro-trigger system scoped to entry-based displays (auras + pulses + items) where the manualDuration → ACTIVE pattern fits cleanly.
+- **`mainWindow` upvalue capture order in preview popups**: the preview popup helpers reference `mainWindow` to anchor against the config window, but the original `local mainWindow` declaration sat below the helper definitions. Lua resolves names at parse time, so the closure was reading a nil global instead of the file-level local. Moved the forward declaration above the helpers; the actual assignment still lives in `CreateConfigWindow`.
+
+---
+
 ## [1.5.0] — 2026-05-15
 
 ### Added

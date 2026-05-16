@@ -21,6 +21,19 @@ local addonName, ns = ...
 local function GetReleaseNotes()
     return {
         {
+            version = "1.6.0",
+            date = "2026-05-16",
+            items = {
+                ns.L["Macro trigger system: every aura, pulse, and item editor has a new 'Trigger key' field. Fire any configured display from a macro with /hht trigger <key> or from another addon via HNZHealingTools.Trigger(key). Multiple entries can share a key — one keybind fires them all at once."],
+                ns.L["New Macros help page in the config sidebar with copy-pasteable macro examples and Lua snippets."],
+                ns.L["Floating preview popup: 'Show preview' button at the top of pages with a Live Preview block (Cursor / Ring / Pulse settings + Cursor Ring sub-tabs). Opens to the right of the config window, single-active across pages, inherits position when switching."],
+                ns.L["Stack count now displays correctly for fully-restricted auras tracked by Blizzard's Cooldown Manager (e.g. Mana Tea). The addon now reads the stack count via the same SetText/GetText technique Blizzard's own CDM viewer uses, so SecureNumber values are no longer lost in combat."],
+                ns.L["Restricted auras visible in the Cooldown Manager but invisible to addon APIs now synthesize ACTIVE state from the CDM hook (stacks + appliedAt) — icon + count + optional timer render correctly even when all 6 detection paths fail."],
+                ns.L["/hht auradebug now reports inCombat status, CDM-captured stack count, and the full list of FontStrings on the matching CDM frame — useful for diagnosing in-combat detection failures."],
+                ns.L["Public API namespace _G.HNZHealingTools exposed for macros and other addons (.version, .Trigger(key))."],
+            },
+        },
+        {
             version = "1.5.0",
             date = "2026-05-15",
             items = {
