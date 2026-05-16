@@ -392,4 +392,68 @@ ns.RegisterLocale("esES", {
         "Fix: comparar spellId SecureNumber en la iteración de slots tainteaba el addon ('attempt to compare a secret number value'). Envuelto en ToPublic + pcall — auras fully-restricted se saltean a salvo en lugar de crashear el frame entero.",
     ["Fix: ApplyRingVisibility nil call when a ring test entry expired (forward declaration bug, latent since 1.3.0)."] =
         "Fix: llamada nil a ApplyRingVisibility cuando una entry de test del ring expiraba (bug de forward declaration, latente desde 1.3.0).",
+
+    -- ===== Release notes 1.6.0 =====
+    ["Macro trigger system: every aura, pulse, and item editor has a new 'Trigger key' field. Fire any configured display from a macro with /hht trigger <key> or from another addon via HNZHealingTools.Trigger(key). Multiple entries can share a key — one keybind fires them all at once."] =
+        "Sistema de trigger por macro: cada editor de aura, pulse e item tiene un campo nuevo 'Trigger key'. Disparás cualquier display configurado desde una macro con /hht trigger <key> o desde otro addon vía HNZHealingTools.Trigger(key). Varias entries pueden compartir la misma key — un solo keybind las dispara todas.",
+    ["New Macros help page in the config sidebar with copy-pasteable macro examples and Lua snippets."] =
+        "Nueva página Macros en el sidebar del config con ejemplos de macro y snippets de Lua copiables.",
+    ["Floating preview popup: 'Show preview' button at the top of pages with a Live Preview block (Cursor / Ring / Pulse settings + Cursor Ring sub-tabs). Opens to the right of the config window, single-active across pages, inherits position when switching."] =
+        "Preview popup flotante: botón 'Show preview' arriba de las páginas que tenían preview inline (Cursor / Ring / Pulse settings + sub-tabs de Cursor Ring). Se abre a la derecha del config, único activo entre páginas, hereda la posición al cambiar.",
+    ["Stack count now displays correctly for fully-restricted auras tracked by Blizzard's Cooldown Manager (e.g. Mana Tea). The addon now reads the stack count via the same SetText/GetText technique Blizzard's own CDM viewer uses, so SecureNumber values are no longer lost in combat."] =
+        "El número de cargas ahora se muestra correctamente para auras fully-restricted trackeadas por el Cooldown Manager de Blizzard (e.g. Té de maná). El addon lee el conteo vía la misma técnica SetText/GetText que usa el viewer CDM de Blizzard, así los valores SecureNumber no se pierden en combate.",
+    ["Restricted auras visible in the Cooldown Manager but invisible to addon APIs now synthesize ACTIVE state from the CDM hook (stacks + appliedAt) — icon + count + optional timer render correctly even when all 6 detection paths fail."] =
+        "Auras restricted visibles en el Cooldown Manager pero invisibles a la API del addon ahora sintetizan estado ACTIVE desde el hook de CDM (stacks + appliedAt) — icono + conteo + timer opcional se renderizan aunque los 6 paths de detección fallen.",
+    ["/hht auradebug now reports inCombat status, CDM-captured stack count, and the full list of FontStrings on the matching CDM frame — useful for diagnosing in-combat detection failures."] =
+        "/hht auradebug ahora reporta estado de combate (inCombat), conteo de stacks capturado por CDM, y la lista completa de FontStrings del frame CDM que matchea — útil para diagnosticar fallos de detección en combate.",
+    ["Public API namespace _G.HNZHealingTools exposed for macros and other addons (.version, .Trigger(key))."] =
+        "Namespace de API pública _G.HNZHealingTools expuesto para macros y otros addons (.version, .Trigger(key)).",
+
+    -- ===== Macros page + trigger UI =====
+    ["Macros"] = "Macros",
+    ["Trigger key:"] = "Clave trigger:",
+    ["Show preview"] = "Ver preview",
+    ["Optional. Fire this aura from a macro: /hht trigger <key>. Requires Duration > 0. Case-insensitive."] =
+        "Opcional. Disparar esta aura desde una macro: /hht trigger <key>. Requiere Duration > 0. Insensible a mayúsculas.",
+    ["Optional. Fire this pulse from a macro: /hht trigger <key>. Case-insensitive."] =
+        "Opcional. Disparar este pulse desde una macro: /hht trigger <key>. Insensible a mayúsculas.",
+    ["Optional. Fire this item from a macro: /hht trigger <key>. Case-insensitive."] =
+        "Opcional. Disparar este item desde una macro: /hht trigger <key>. Insensible a mayúsculas.",
+    ["Usage: /hht trigger <key>"] = "Uso: /hht trigger <key>",
+    ["Triggered %d entrie(s) for key '%s'"] = "Disparadas %d entries para la key '%s'",
+    ["No entries match triggerKey '%s'"] = "Ninguna entry coincide con triggerKey '%s'",
+    ["Trigger displays from macros"] = "Disparar displays desde macros",
+    ["You can fire any aura or pulse from a macro, keybind, or another addon — without needing the actual aura/cooldown to trigger. Useful for one-shot visual signals (panic ring, cooldown reminder, callout from a partner addon)."] =
+        "Podés disparar cualquier aura o pulse desde una macro, keybind u otro addon — sin necesidad de que la aura/cooldown se active realmente. Útil para señales visuales puntuales (ring de pánico, recordatorio de cooldown, aviso desde otro addon).",
+    ["1. Where you can set a Trigger key"] = "1. Dónde podés setear una Trigger key",
+    ["Open the editor of any of these and fill in the \"Trigger key\" field:"] =
+        "Abrí el editor de cualquiera de estos y llená el campo \"Trigger key\":",
+    ["  • Cursor Aura — fires the aura's icon at cursor for its Duration."] =
+        "  • Cursor Aura — dispara el icono del aura cerca del cursor durante su Duration.",
+    ["  • Ring Aura — fires the colored ring around your character for its Duration."] =
+        "  • Ring Aura — dispara el anillo de color alrededor del personaje durante su Duration.",
+    ["  • Cursor Item — fires the central pulse with the item's icon + optional sound."] =
+        "  • Cursor Item — dispara el pulse central con el icono del item + sonido opcional.",
+    ["  • Pulse Spell / Pulse Aura / Pulse Item — fires the central screen pulse + optional sound."] =
+        "  • Pulse Spell / Pulse Aura / Pulse Item — dispara el pulse central de pantalla + sonido opcional.",
+    ["2. Fire it"] = "2. Disparalo",
+    ["From a chat message or macro line:"] = "Desde un mensaje de chat o línea de macro:",
+    ["From Lua (other addons, /run, WeakAuras custom code):"] =
+        "Desde Lua (otros addons, /run, código custom de WeakAuras):",
+    ["Example: cast + trigger together"] = "Ejemplo: cast + trigger juntos",
+    ["Combine a real cast with a visual trigger in one macro:"] =
+        "Combiná un cast real con un trigger visual en una sola macro:",
+    ["Tips"] = "Tips",
+    ["  • Multiple entries can share the same trigger key — they all fire at once (e.g. one key can show a Ring Aura + play a Pulse simultaneously)."] =
+        "  • Varias entries pueden compartir la misma trigger key — se disparan todas a la vez (e.g. una key puede mostrar un Ring Aura + tocar un Pulse simultáneamente).",
+    ["  • Trigger keys are case-insensitive. \"Panic\" and \"panic\" match the same entries."] =
+        "  • Las trigger keys son insensibles a mayúsculas. \"Panic\" y \"panic\" matchean las mismas entries.",
+    ["  • Aura entries (Cursor / Ring) require Duration > 0 — without a duration there's no way to know when the visual should disappear."] =
+        "  • Las entries de aura (Cursor / Ring) requieren Duration > 0 — sin duración no hay forma de saber cuándo desaparece el visual.",
+    ["  • Pulse entries fire immediately and the animation has its own length (configured globally in Pulse → Config)."] =
+        "  • Las entries de pulse se disparan al instante y la animación tiene su largo propio (configurado globalmente en Pulse → Config).",
+    ["  • HNZHealingTools.Trigger(key) returns the number of entries that matched (0 = no entries have that key)."] =
+        "  • HNZHealingTools.Trigger(key) devuelve la cantidad de entries que matchearon (0 = ninguna entry tiene esa key).",
+    ["  • Combat-safe: trigger keys work during combat lockdown."] =
+        "  • Combat-safe: las trigger keys funcionan durante combat lockdown.",
 })

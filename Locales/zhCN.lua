@@ -221,4 +221,68 @@ ns.RegisterLocale("zhCN", {
         "修复：在 slot 迭代中比较 SecureNumber spellId 污染了插件（'attempt to compare a secret number value'）。包装在 ToPublic + pcall 中 — 完全受限光环被安全跳过，而不是导致整个 frame 崩溃。",
     ["Fix: ApplyRingVisibility nil call when a ring test entry expired (forward declaration bug, latent since 1.3.0)."] =
         "修复：环测试条目过期时 ApplyRingVisibility 的 nil 调用（前向声明 bug，自 1.3.0 起潜伏）。",
+
+    -- ===== Release notes 1.6.0 =====
+    ["Macro trigger system: every aura, pulse, and item editor has a new 'Trigger key' field. Fire any configured display from a macro with /hht trigger <key> or from another addon via HNZHealingTools.Trigger(key). Multiple entries can share a key — one keybind fires them all at once."] =
+        "宏触发系统：每个光环、脉冲和物品编辑器都新增了 'Trigger key' 字段。通过宏使用 /hht trigger <key> 或通过其他插件使用 HNZHealingTools.Trigger(key) 触发任何已配置的显示。多个条目可共享同一 key — 一个按键即可同时触发所有条目。",
+    ["New Macros help page in the config sidebar with copy-pasteable macro examples and Lua snippets."] =
+        "配置侧边栏新增 Macros 帮助页面，包含可复制粘贴的宏示例和 Lua 片段。",
+    ["Floating preview popup: 'Show preview' button at the top of pages with a Live Preview block (Cursor / Ring / Pulse settings + Cursor Ring sub-tabs). Opens to the right of the config window, single-active across pages, inherits position when switching."] =
+        "浮动预览弹窗：原本带 Live Preview 块的页面（Cursor / Ring / Pulse 设置 + Cursor Ring 子选项卡）顶部新增 'Show preview' 按钮。在配置窗口右侧打开，跨页面单一活动，切换时继承位置。",
+    ["Stack count now displays correctly for fully-restricted auras tracked by Blizzard's Cooldown Manager (e.g. Mana Tea). The addon now reads the stack count via the same SetText/GetText technique Blizzard's own CDM viewer uses, so SecureNumber values are no longer lost in combat."] =
+        "由 Blizzard Cooldown Manager 追踪的完全受限光环（如法力茶）的堆叠数现在能正确显示。插件通过与 Blizzard CDM 查看器相同的 SetText/GetText 技术读取堆叠数，因此战斗中不再丢失 SecureNumber 值。",
+    ["Restricted auras visible in the Cooldown Manager but invisible to addon APIs now synthesize ACTIVE state from the CDM hook (stacks + appliedAt) — icon + count + optional timer render correctly even when all 6 detection paths fail."] =
+        "在 Cooldown Manager 中可见但对插件 API 不可见的受限光环现在从 CDM 钩子合成 ACTIVE 状态（stacks + appliedAt）——即使 6 个检测路径全部失败，图标 + 计数 + 可选计时器也能正确渲染。",
+    ["/hht auradebug now reports inCombat status, CDM-captured stack count, and the full list of FontStrings on the matching CDM frame — useful for diagnosing in-combat detection failures."] =
+        "/hht auradebug 现在报告战斗状态（inCombat）、CDM 捕获的堆叠数和匹配 CDM frame 的全部 FontString 列表——有助于诊断战斗中的检测失败。",
+    ["Public API namespace _G.HNZHealingTools exposed for macros and other addons (.version, .Trigger(key))."] =
+        "为宏和其他插件公开的 API 命名空间 _G.HNZHealingTools（.version、.Trigger(key)）。",
+
+    -- ===== Macros page + trigger UI =====
+    ["Macros"] = "宏",
+    ["Trigger key:"] = "触发键:",
+    ["Show preview"] = "显示预览",
+    ["Optional. Fire this aura from a macro: /hht trigger <key>. Requires Duration > 0. Case-insensitive."] =
+        "可选。从宏触发此光环：/hht trigger <key>。需要 Duration > 0。不区分大小写。",
+    ["Optional. Fire this pulse from a macro: /hht trigger <key>. Case-insensitive."] =
+        "可选。从宏触发此脉冲：/hht trigger <key>。不区分大小写。",
+    ["Optional. Fire this item from a macro: /hht trigger <key>. Case-insensitive."] =
+        "可选。从宏触发此物品：/hht trigger <key>。不区分大小写。",
+    ["Usage: /hht trigger <key>"] = "用法：/hht trigger <key>",
+    ["Triggered %d entrie(s) for key '%s'"] = "为键 '%s' 触发了 %d 个条目",
+    ["No entries match triggerKey '%s'"] = "没有条目匹配 triggerKey '%s'",
+    ["Trigger displays from macros"] = "从宏触发显示",
+    ["You can fire any aura or pulse from a macro, keybind, or another addon — without needing the actual aura/cooldown to trigger. Useful for one-shot visual signals (panic ring, cooldown reminder, callout from a partner addon)."] =
+        "你可以从宏、按键绑定或其他插件触发任何光环或脉冲——无需实际的光环/冷却触发。适合一次性视觉信号（恐慌环、冷却提醒、来自伙伴插件的提示）。",
+    ["1. Where you can set a Trigger key"] = "1. 在哪里设置触发键",
+    ["Open the editor of any of these and fill in the \"Trigger key\" field:"] =
+        "打开以下任一项的编辑器并填写 \"触发键\" 字段：",
+    ["  • Cursor Aura — fires the aura's icon at cursor for its Duration."] =
+        "  • Cursor Aura — 在 Duration 期间在光标处触发光环图标。",
+    ["  • Ring Aura — fires the colored ring around your character for its Duration."] =
+        "  • Ring Aura — 在 Duration 期间在角色周围触发彩色环。",
+    ["  • Cursor Item — fires the central pulse with the item's icon + optional sound."] =
+        "  • Cursor Item — 触发中央脉冲，附带物品图标 + 可选声音。",
+    ["  • Pulse Spell / Pulse Aura / Pulse Item — fires the central screen pulse + optional sound."] =
+        "  • Pulse Spell / Pulse Aura / Pulse Item — 触发屏幕中央脉冲 + 可选声音。",
+    ["2. Fire it"] = "2. 触发",
+    ["From a chat message or macro line:"] = "从聊天消息或宏行：",
+    ["From Lua (other addons, /run, WeakAuras custom code):"] =
+        "从 Lua（其他插件、/run、WeakAuras 自定义代码）：",
+    ["Example: cast + trigger together"] = "示例：施法 + 触发一起",
+    ["Combine a real cast with a visual trigger in one macro:"] =
+        "在一个宏中将真实施法与视觉触发结合：",
+    ["Tips"] = "提示",
+    ["  • Multiple entries can share the same trigger key — they all fire at once (e.g. one key can show a Ring Aura + play a Pulse simultaneously)."] =
+        "  • 多个条目可共享同一触发键——同时全部触发（例如一个键可同时显示 Ring Aura + 播放 Pulse）。",
+    ["  • Trigger keys are case-insensitive. \"Panic\" and \"panic\" match the same entries."] =
+        "  • 触发键不区分大小写。\"Panic\" 和 \"panic\" 匹配同样的条目。",
+    ["  • Aura entries (Cursor / Ring) require Duration > 0 — without a duration there's no way to know when the visual should disappear."] =
+        "  • 光环条目（Cursor / Ring）需要 Duration > 0 — 没有持续时间就无法知道视觉何时应消失。",
+    ["  • Pulse entries fire immediately and the animation has its own length (configured globally in Pulse → Config)."] =
+        "  • 脉冲条目立即触发，动画有自己的长度（在 Pulse → Config 中全局配置）。",
+    ["  • HNZHealingTools.Trigger(key) returns the number of entries that matched (0 = no entries have that key)."] =
+        "  • HNZHealingTools.Trigger(key) 返回匹配的条目数（0 = 没有条目拥有该键）。",
+    ["  • Combat-safe: trigger keys work during combat lockdown."] =
+        "  • 战斗安全：触发键在战斗锁定期间也可使用。",
 })

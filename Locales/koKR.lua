@@ -221,4 +221,68 @@ ns.RegisterLocale("koKR", {
         "수정: 슬롯 반복에서 SecureNumber spellId 비교가 애드온을 오염시킴('attempt to compare a secret number value'). ToPublic + pcall로 감쌈 — 완전-제한된 효과는 전체 프레임을 충돌시키는 대신 안전하게 건너뜁니다.",
     ["Fix: ApplyRingVisibility nil call when a ring test entry expired (forward declaration bug, latent since 1.3.0)."] =
         "수정: 링 테스트 항목이 만료될 때 ApplyRingVisibility nil 호출(전방 선언 버그, 1.3.0부터 잠복).",
+
+    -- ===== Release notes 1.6.0 =====
+    ["Macro trigger system: every aura, pulse, and item editor has a new 'Trigger key' field. Fire any configured display from a macro with /hht trigger <key> or from another addon via HNZHealingTools.Trigger(key). Multiple entries can share a key — one keybind fires them all at once."] =
+        "매크로 트리거 시스템: 모든 효과/펄스/아이템 편집기에 'Trigger key' 필드가 추가됨. 매크로에서 /hht trigger <key> 또는 다른 애드온에서 HNZHealingTools.Trigger(key)로 구성된 표시를 발동할 수 있음. 여러 항목이 같은 키를 공유 가능 — 키바인드 하나로 모두 동시에 발동.",
+    ["New Macros help page in the config sidebar with copy-pasteable macro examples and Lua snippets."] =
+        "설정 사이드바에 새 '매크로' 도움말 페이지 추가 — 복사 가능한 매크로 예시와 Lua 스니펫 포함.",
+    ["Floating preview popup: 'Show preview' button at the top of pages with a Live Preview block (Cursor / Ring / Pulse settings + Cursor Ring sub-tabs). Opens to the right of the config window, single-active across pages, inherits position when switching."] =
+        "플로팅 미리보기 팝업: 라이브 미리보기 블록이 있던 페이지(Cursor / Ring / Pulse 설정 + Cursor Ring 하위 탭) 상단에 '미리보기 표시' 버튼. 설정 창 오른쪽으로 열림, 페이지 간 단일 활성, 전환 시 위치 상속.",
+    ["Stack count now displays correctly for fully-restricted auras tracked by Blizzard's Cooldown Manager (e.g. Mana Tea). The addon now reads the stack count via the same SetText/GetText technique Blizzard's own CDM viewer uses, so SecureNumber values are no longer lost in combat."] =
+        "블리자드의 재사용 대기시간 관리자가 추적하는 완전-제한된 효과(예: 마나차)의 중첩 수가 이제 올바르게 표시됨. 애드온이 블리자드 CDM 뷰어와 동일한 SetText/GetText 기법으로 중첩 수를 읽어, 전투 중 SecureNumber 값이 더 이상 손실되지 않음.",
+    ["Restricted auras visible in the Cooldown Manager but invisible to addon APIs now synthesize ACTIVE state from the CDM hook (stacks + appliedAt) — icon + count + optional timer render correctly even when all 6 detection paths fail."] =
+        "재사용 대기시간 관리자에 보이지만 애드온 API에는 보이지 않는 제한된 효과가 이제 CDM 후크에서 ACTIVE 상태를 합성함(stacks + appliedAt) — 6개 탐지 경로가 모두 실패해도 아이콘 + 카운트 + 선택 타이머가 올바르게 표시됨.",
+    ["/hht auradebug now reports inCombat status, CDM-captured stack count, and the full list of FontStrings on the matching CDM frame — useful for diagnosing in-combat detection failures."] =
+        "/hht auradebug가 이제 전투 상태(inCombat), CDM에서 캡처한 중첩 수, 일치하는 CDM 프레임의 모든 FontString 목록을 보고함 — 전투 중 탐지 실패 진단에 유용.",
+    ["Public API namespace _G.HNZHealingTools exposed for macros and other addons (.version, .Trigger(key))."] =
+        "매크로와 다른 애드온을 위한 공개 API 네임스페이스 _G.HNZHealingTools 노출(.version, .Trigger(key)).",
+
+    -- ===== Macros page + trigger UI =====
+    ["Macros"] = "매크로",
+    ["Trigger key:"] = "트리거 키:",
+    ["Show preview"] = "미리보기 표시",
+    ["Optional. Fire this aura from a macro: /hht trigger <key>. Requires Duration > 0. Case-insensitive."] =
+        "선택. 매크로에서 이 효과 발동: /hht trigger <key>. Duration > 0 필요. 대소문자 구분 없음.",
+    ["Optional. Fire this pulse from a macro: /hht trigger <key>. Case-insensitive."] =
+        "선택. 매크로에서 이 펄스 발동: /hht trigger <key>. 대소문자 구분 없음.",
+    ["Optional. Fire this item from a macro: /hht trigger <key>. Case-insensitive."] =
+        "선택. 매크로에서 이 아이템 발동: /hht trigger <key>. 대소문자 구분 없음.",
+    ["Usage: /hht trigger <key>"] = "사용법: /hht trigger <key>",
+    ["Triggered %d entrie(s) for key '%s'"] = "키 '%s'에 대해 %d개 항목 발동",
+    ["No entries match triggerKey '%s'"] = "triggerKey '%s'에 일치하는 항목 없음",
+    ["Trigger displays from macros"] = "매크로에서 표시 발동",
+    ["You can fire any aura or pulse from a macro, keybind, or another addon — without needing the actual aura/cooldown to trigger. Useful for one-shot visual signals (panic ring, cooldown reminder, callout from a partner addon)."] =
+        "실제 효과/재사용 대기시간이 발동되지 않아도 매크로, 키바인드 또는 다른 애드온에서 모든 효과나 펄스를 발동할 수 있음. 일회성 시각 신호(패닉 링, 재사용 대기시간 알림, 파트너 애드온의 콜아웃)에 유용.",
+    ["1. Where you can set a Trigger key"] = "1. 트리거 키를 설정할 수 있는 곳",
+    ["Open the editor of any of these and fill in the \"Trigger key\" field:"] =
+        "아래 항목의 편집기를 열고 \"트리거 키\" 필드를 채우세요:",
+    ["  • Cursor Aura — fires the aura's icon at cursor for its Duration."] =
+        "  • 커서 효과 — Duration 동안 커서에 효과 아이콘을 발동.",
+    ["  • Ring Aura — fires the colored ring around your character for its Duration."] =
+        "  • 링 효과 — Duration 동안 캐릭터 주위에 색상 링을 발동.",
+    ["  • Cursor Item — fires the central pulse with the item's icon + optional sound."] =
+        "  • 커서 아이템 — 아이템 아이콘으로 중앙 펄스 + 선택 사운드 발동.",
+    ["  • Pulse Spell / Pulse Aura / Pulse Item — fires the central screen pulse + optional sound."] =
+        "  • 펄스 주문 / 펄스 효과 / 펄스 아이템 — 중앙 화면 펄스 + 선택 사운드 발동.",
+    ["2. Fire it"] = "2. 발동",
+    ["From a chat message or macro line:"] = "대화 메시지 또는 매크로 줄에서:",
+    ["From Lua (other addons, /run, WeakAuras custom code):"] =
+        "Lua에서 (다른 애드온, /run, WeakAuras 사용자 코드):",
+    ["Example: cast + trigger together"] = "예시: 시전 + 트리거 함께",
+    ["Combine a real cast with a visual trigger in one macro:"] =
+        "실제 시전과 시각 트리거를 하나의 매크로에 결합:",
+    ["Tips"] = "팁",
+    ["  • Multiple entries can share the same trigger key — they all fire at once (e.g. one key can show a Ring Aura + play a Pulse simultaneously)."] =
+        "  • 여러 항목이 같은 트리거 키를 공유 가능 — 동시에 모두 발동(예: 키 하나로 링 효과 표시 + 펄스 재생 동시).",
+    ["  • Trigger keys are case-insensitive. \"Panic\" and \"panic\" match the same entries."] =
+        "  • 트리거 키는 대소문자 구분 없음. \"Panic\"과 \"panic\"은 같은 항목에 일치.",
+    ["  • Aura entries (Cursor / Ring) require Duration > 0 — without a duration there's no way to know when the visual should disappear."] =
+        "  • 효과 항목(커서/링)은 Duration > 0 필요 — 지속시간 없이는 시각이 사라질 때를 알 수 없음.",
+    ["  • Pulse entries fire immediately and the animation has its own length (configured globally in Pulse → Config)."] =
+        "  • 펄스 항목은 즉시 발동하며 애니메이션은 자체 길이가 있음(Pulse → Config에서 전역 설정).",
+    ["  • HNZHealingTools.Trigger(key) returns the number of entries that matched (0 = no entries have that key)."] =
+        "  • HNZHealingTools.Trigger(key)는 일치한 항목 수를 반환(0 = 해당 키를 가진 항목 없음).",
+    ["  • Combat-safe: trigger keys work during combat lockdown."] =
+        "  • 전투 안전: 전투 잠금 중에도 트리거 키 작동.",
 })
