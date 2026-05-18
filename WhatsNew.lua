@@ -21,6 +21,23 @@ local addonName, ns = ...
 local function GetReleaseNotes()
     return {
         {
+            version = "1.7.0",
+            date = "2026-05-18",
+            items = {
+                ns.L["Ready Check Panel: floating checklist that appears on /readycheck and auto-hides when you respond (or on combat start, or via the new X close button). Tracks Well Fed, Flask, Augment Rune, Weapon Imbue, party-aware Class Buffs (Skyfury / Power Word: Fortitude / Mark of the Wild / Arcane Intellect / Battle Shout / Blessing of the Bronze), Healthstone (only when a Warlock is in the group), a mana reminder, and your active Talent Loadout. Bag oils / runes / foods / flasks / mana drinks / healthstones appear as clickable sub-rows."],
+                ns.L["Talent Loadout per content type: in Config → Ready Check → Talents, assign each saved loadout to one or more categories (Raid, Mythic+, Dungeon, PvP, Delve). The panel warns when the active loadout doesn't match the current content and offers a Switch button that applies the saved loadout for you (out of combat only)."],
+                ns.L["Universal weapon imbue detection: works for every class, both hands. Class self-casters (Shaman / Rogue) get a Cast button; other classes get the bag oils as click-to-use sub-rows. Eating channel is auto-detected via the food/drink aura — no need to click the addon's sub-row first."],
+                ns.L["Habilitar Funciones (General page): master enable per feature (Cursor, Ring, Pulse, Cursor Ring, MRT / NSRT, Ready Check). Disabling a feature grays its sidebar entry and locks its config page behind a translucent overlay. Per-page Enable X checkboxes were removed in favor of this central control."],
+                ns.L["Sidebar reorganized: General moved to the top. Hover the icon of any green (OK) check row in the panel to see the native spell or item tooltip."],
+                ns.L["/hnz oildiag slash command: dumps weapon enchant state + player auras for diagnosing weapon imbue detection per patch."],
+                ns.L["Fix: weapon imbue on classes without a self-cast spell (Monk, Druid, etc.) was rendered as red X even with the oil applied — the row now correctly shows green check."],
+                ns.L["Fix: Blessing of the Bronze and other class buffs whose aura spellID differs from the cast spellID are now detected via name fallback."],
+                ns.L["Fix: Talent loadout Switch now actually applies the talents (LoadConfig + CommitConfig). Previously it only selected them in the editor."],
+                ns.L["Fix: item counts in sub-rows are now bag-only (warband / account bank excluded)."],
+                ns.L["Fix: Cursor Ring master toggle now hides the dot and cast wedges too — previously it only hid the decorative ring."],
+            },
+        },
+        {
             version = "1.6.0",
             date = "2026-05-16",
             items = {

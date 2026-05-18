@@ -6,6 +6,33 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ---
 
+## [1.7.0] — 2026-05-18
+
+### Added
+- **Ready Check Panel**: floating checklist panel that appears on `READY_CHECK` and auto-hides on `READY_CHECK_CONFIRM` (player response) or `READY_CHECK_FINISHED`. Checks: Well Fed, Flask/Phial, Augment Rune, Weapon Imbue (all classes, both hands), Class buffs (party-aware: Power Word: Fortitude / Arcane Intellect / Battle Shout / Mark of the Wild / Skyfury / Blessing of the Bronze), Healthstone (only when a Warlock is in the group), neutral "Check your mana" reminder, Talent Loadout. Each row supports click-to-use sub-rows for bag items (oils, runes, foods, flasks, mana drinks, healthstones).
+- **Talent loadout validation per content type**: assign each saved talent loadout to one or more categories (Raid, Mythic+, Dungeon, PvP, Delve) in `Config → Ready Check → Talents`. At ready check, the panel shows the active loadout. If a category-specific loadout is configured and the active one doesn't match, a `Switch` button appears that calls `C_ClassTalents.LoadConfig` + `C_Traits.CommitConfig` (only out of combat).
+- **Class buff whisper action**: when a raid buff is missing and a member of the providing class is in the group, a clickable `Ask` button whispers them `Could you Buff me please?` (or `Cast` if you provide it yourself).
+- **Weapon imbue universal detection**: works for every class via `GetWeaponEnchantInfo` on both hands plus a fallback aura scan against known buff spellIDs (`KNOWN_BUFF_SPELLIDS.weaponImbue`). Self-cast classes (Shaman / Rogue) still get a `Cast` button.
+- **Eating channel auto-detect via aura 1232065**: while the food/drink channel aura is active, the corresponding row shows the eating countdown automatically (no longer requires clicking the addon's sub-row first).
+- **General page master toggles ("Habilitar Funciones")**: per-feature checkboxes for Cursor, Ring, Pulse, Cursor Ring, MRT / NSRT and Ready Check. Disabling a feature grays its sidebar entry and locks the corresponding config page behind a translucent overlay with a "Feature disabled — enable in General > Habilitar Funciones" message.
+- **Hover tooltips on OK rows**: hovering the icon of a buff-OK row opens the native spell or item tooltip via `GameTooltip:SetSpellByID` / `SetItemByID`.
+- **Close button (X)** on the panel header + auto-hide on `PLAYER_REGEN_DISABLED` (combat start). Prevents the panel from getting stuck through an entire pull when something interrupts the normal hide chain.
+- **`/hnz oildiag` slash command**: dumps `GetWeaponEnchantInfo` return values, mainhand/offhand item links, and the full player aura list (name + spellId). Used to diagnose weapon enchant detection issues per patch.
+
+### Changed
+- **Sidebar restructured**: `General` page moved to the top. Per-page `Enable X` checkboxes (Cursor display, Ring display, Pulse, Cursor Ring, MRT timeline, Ready Check) removed — all live in `General → Habilitar Funciones` now. Toggling triggers the module's `Refresh<Feature>()` so the effect is immediate.
+- **CursorRing master gate**: `cursorRing.enabled = false` now hides ring + cast + dot uniformly. Previously the master only hid the decorative ring while the dot and cast wedges kept following the cursor.
+- **`GetItemCount` wrapped to bag-only**: explicit `false` for all bank/reagent/account-bank flags so item counts shown in sub-rows match the bag and exclude warband bank contents.
+- **Defaults**: `cursorRing.enabled` and `mrtTimeline.enabled` now default to `true` for fresh profiles.
+
+### Fixed
+- **`SetRowBuff` fallback icon**: rows where `ok=true` but no class spellID was available (e.g. weapon imbue on a Monk) were incorrectly rendered with the red X texture. Now falls back to the green check texture so the row reflects the actual state.
+- **Blessing of the Bronze detection**: the cast spellID (364342) and the aura spellID applied to the target differ per class (DK/Evoker/War=381732, Rogue=381751, etc.). Added a name-based fallback in `MakeClassBuffCheckFn` that compares `aura.name` against `C_Spell.GetSpellInfo(castSpellID).name` (i18n-safe, both come from the same API).
+- **Talent loadout switch**: `LoadConfig` alone left the new talents selected in the editor but not applied. The Switch button now also calls `C_Traits.CommitConfig` when `LoadConfig` returns `Enum.LoadConfigResult.Ready` and updates `GetLastSelectedSavedConfigID` so the panel re-renders with the new active loadout.
+- **Mana reminder visibility**: the row no longer depends on reading `UnitPower` (unreadable in the restricted READY_CHECK context). Always shown as a neutral white reminder for any class; users can disable per-class via the `checkResourceFull` toggle.
+
+---
+
 ## [1.6.0] — 2026-05-16
 
 ### Added
