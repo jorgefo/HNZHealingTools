@@ -13,6 +13,35 @@ function ns:InitConfig()
         elseif cmd == "cdm" then ns:DumpCdm()
         elseif cmd == "status" then ns:DumpCursorStatus(); ns:DumpRingStatus()
         elseif cmd == "minimap" then if ns.ToggleMinimapButton then ns:ToggleMinimapButton() end
+        elseif cmd == "oildiag" then
+            -- Dump diagnostico para entender por que un aceite no se detecta.
+            -- Imprime GetWeaponEnchantInfo (los 8 valores) + mainhand/offhand
+            -- item links + auras activas del player. Usado para identificar el
+            -- spellID/enchantID que aplica un oil que no estamos cubriendo.
+            print("|cff00ccffHNZ|r Weapon enchant diagnostic:")
+            if GetWeaponEnchantInfo then
+                local hMH, eMH, cMH, idMH, hOH, eOH, cOH, idOH = GetWeaponEnchantInfo()
+                print(string.format("  MH: has=%s exp=%s charges=%s enchantID=%s",
+                    tostring(hMH), tostring(eMH), tostring(cMH), tostring(idMH)))
+                print(string.format("  OH: has=%s exp=%s charges=%s enchantID=%s",
+                    tostring(hOH), tostring(eOH), tostring(cOH), tostring(idOH)))
+            else
+                print("  GetWeaponEnchantInfo nil")
+            end
+            local mhLink = GetInventoryItemLink and GetInventoryItemLink("player", 16)
+            local ohLink = GetInventoryItemLink and GetInventoryItemLink("player", 17)
+            print("  MH link: " .. (mhLink or "<none>"))
+            print("  OH link: " .. (ohLink or "<none>"))
+            if C_UnitAuras and C_UnitAuras.GetBuffDataByIndex then
+                print("  Player buffs:")
+                for i = 1, 40 do
+                    local a = C_UnitAuras.GetBuffDataByIndex("player", i)
+                    if not a then break end
+                    print(string.format("    [%d] %s  spellId=%s sourceItemID=%s",
+                        i, tostring(a.name), tostring(a.spellId),
+                        tostring(a.sourceUnit)))
+                end
+            end
         elseif cmd == "trigger" then
             local key = rest and rest:match("^%s*(%S+)") or nil
             if not key or key == "" then
@@ -1349,15 +1378,27 @@ local function CreateModalTabs(parent, tabNames)
 
     local tabBtns, tabFrames = {}, {}
 
+    -- Si b._disabled, override del text color a plomo. Mantiene el resto del
+    -- styling (backdrop active/inactive) para que el tab sigue siendo
+    -- clickeable y visible — solo el texto cambia a gris para indicar que la
+    -- categoria asociada esta off.
     local function StyleTabBtn(b, active)
         if active then
             b:SetBackdropColor(C_HOVER.r, C_HOVER.g, C_HOVER.b, 0.7)
             b:SetBackdropBorderColor(C_ACCENT.r, C_ACCENT.g, C_ACCENT.b, 0.9)
-            b.Text:SetTextColor(C_ACCENT.r, C_ACCENT.g, C_ACCENT.b)
+            if b._disabled then
+                b.Text:SetTextColor(0.55, 0.55, 0.55)
+            else
+                b.Text:SetTextColor(C_ACCENT.r, C_ACCENT.g, C_ACCENT.b)
+            end
         else
             b:SetBackdropColor(C_PANEL.r, C_PANEL.g, C_PANEL.b, 0.4)
             b:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.6)
-            b.Text:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+            if b._disabled then
+                b.Text:SetTextColor(0.5, 0.5, 0.5)
+            else
+                b.Text:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+            end
         end
     end
 
@@ -1382,7 +1423,19 @@ local function CreateModalTabs(parent, tabNames)
         tabFrames[i]=content
     end
 
-    return tabFrames, ShowTab
+    -- Permite togglear el estado disabled de un tab (gray text). Mantiene
+    -- el invariant de active/inactive — re-styla preservando que tab esta
+    -- visible actualmente.
+    local function SetTabEnabled(idx, enabled)
+        local b = tabBtns[idx]
+        if not b then return end
+        b._disabled = not enabled
+        local activeIdx
+        for i,f in ipairs(tabFrames) do if f:IsShown() then activeIdx = i; break end end
+        StyleTabBtn(b, activeIdx == idx)
+    end
+
+    return tabFrames, ShowTab, SetTabEnabled
 end
 
 local function CreateCursorSpellEditor()
@@ -2960,14 +3013,13 @@ local function BuildCursorSettingsPage(p)
     prvBtn:SetScript("OnClick", function() GetCursorDisplayPreviewOpener()() end)
     y=y-28
 
-    -- Enable + visibility dropdown en la misma linea, Enable primero (regla
-    -- del usuario para layout consistente entre todas las paginas).
-    local ec=CreateCheckbox(p,ns.L["Enable cursor display"],function() return ns.db.cursorDisplay.enabled end,function(v) ns.db.cursorDisplay.enabled=v; ns:RefreshCursorDisplay() end)
-    ec:SetPoint("TOPLEFT",C1,y); table.insert(allCheckboxes,ec)
+    -- Enable checkbox removido — el master toggle vive en General > Habilitar
+    -- Funciones. Visibility dropdown queda solo en la pagina (no es lo mismo
+    -- que enable: controla cuando mostrar la feature cuando esta on).
     local cc=VisibilityDropdown(p,
         function() return ns.db.cursorDisplay.visibility end,
         function(v) ns.db.cursorDisplay.visibility=v; ns:RefreshCursorDisplay() end)
-    cc:SetPoint("TOPLEFT",C2,y)
+    cc:SetPoint("TOPLEFT",C1,y)
     y=y-32
 
     -- Integracion con MRT/NSRT timeline: cuando una entry triggerea, mostramos
@@ -3008,13 +3060,11 @@ local function BuildRingSettingsPage(p)
     prvBtn:SetScript("OnClick", function() GetRingPreviewOpener()() end)
     y=y-28
 
-    -- Enable + visibility dropdown en la misma linea, Enable primero.
-    local ec=CreateCheckbox(p,ns.L["Enable ring display"],function() return ns.db.ringDisplay.enabled end,function(v) ns.db.ringDisplay.enabled=v; ns:RefreshRingDisplay() end)
-    ec:SetPoint("TOPLEFT",C1,y); table.insert(allCheckboxes,ec)
+    -- Enable checkbox removido — vive en General > Habilitar Funciones.
     local cc=VisibilityDropdown(p,
         function() return ns.db.ringDisplay.visibility end,
         function(v) ns.db.ringDisplay.visibility=v; ns:RefreshRingDisplay() end)
-    cc:SetPoint("TOPLEFT",C2,y)
+    cc:SetPoint("TOPLEFT",C1,y)
     y=y-32
 
     -- Integracion con MRT/NSRT: durante PRE phase de una entry, mostramos un ring
@@ -3248,14 +3298,11 @@ local function BuildCooldownPulsePage(p)
     prvBtn:SetScript("OnClick", function() GetCooldownPulsePreviewOpener()() end)
     y=y-28
 
-    -- Enable + visibility dropdown misma linea, primero (regla del usuario para
-    -- layout consistente entre todas las paginas con feature toggle + combat-gate).
-    local ec=CreateCheckbox(p,ns.L["Enable cooldown pulse"],function() return ns.db.cooldownPulse.enabled end,function(v) ns.db.cooldownPulse.enabled=v end)
-    ec:SetPoint("TOPLEFT",C1,y); table.insert(allCheckboxes,ec)
+    -- Enable checkbox removido — vive en General > Habilitar Funciones.
     local cc=VisibilityDropdown(p,
         function() return ns.db.cooldownPulse.visibility end,
         function(v) ns.db.cooldownPulse.visibility=v end)
-    cc:SetPoint("TOPLEFT",C2,y)
+    cc:SetPoint("TOPLEFT",C1,y)
     y=y-32
 
     -- Integracion con MRT/NSRT: cuando una entry pasa a ACTIVE phase (trigger
@@ -3311,16 +3358,11 @@ local function BuildCursorRingMainPage(p)
     prvBtn:SetScript("OnClick", function() GetCursorRingPreviewPopup():ShowWithFocus("ring", ns.L["Ring"]) end)
     y=y-28
 
-    -- Enable + visibility dropdown en la misma linea, Enable primero (regla
-    -- del usuario para layout consistente entre todas las paginas).
-    local ec=CreateCheckbox(p,ns.L["Enable cursor ring"],
-        function() return ns.db.cursorRing.enabled end,
-        function(v) ns.db.cursorRing.enabled=v; ns:RefreshCursorRing() end)
-    ec:SetPoint("TOPLEFT",C1,y); table.insert(allCheckboxes,ec)
+    -- Enable checkbox removido — vive en General > Habilitar Funciones.
     local cb=VisibilityDropdown(p,
         function() return ns.db.cursorRing.visibility end,
         function(v) ns.db.cursorRing.visibility=v; ns:RefreshCursorRing() end)
-    cb:SetPoint("TOPLEFT",C2,y)
+    cb:SetPoint("TOPLEFT",C1,y)
     y=y-32
 
     local sh=SubH(p,ns.L["Size & Position"]); sh:SetPoint("TOPLEFT",C1,y); local c1y=y-20
@@ -3562,11 +3604,7 @@ local function BuildMrtEncountersPage(p)
     local y = -8
     local hd = H(p, ns.L["MRT / NSRT Timeline Reminders"]); hd:SetPoint("TOPLEFT", 8, y); y = y - 28
 
-    local ec = CreateCheckbox(p, ns.L["Enable MRT / NSRT timeline"],
-        function() return ns.db.mrtTimeline.enabled end,
-        function(v) ns.db.mrtTimeline.enabled = v end)
-    ec:SetPoint("TOPLEFT", 20, y); table.insert(allCheckboxes, ec)
-    y = y - 32
+    -- Enable checkbox removido — vive en General > Habilitar Funciones.
 
     local LIST_HEIGHT = 320
     mrtNotesC = ScrollList(p, y, LIST_HEIGHT); y = y - (LIST_HEIGHT + 12)
@@ -3746,6 +3784,249 @@ end
 -- contiene solo el override de idioma — los strings se resuelven via ns.L
 -- al construir cada widget, asi que cambiar idioma necesita /reload para
 -- refrescar los textos ya pintados (por eso ofrecemos boton de Reload UI).
+-- Page: Ready Check preparation panel. Panel flotante que aparece cuando
+-- alguien dispara /readycheck en el raid y muestra un checklist visual del
+-- estado de prep del player (food/flask/runa/HP/mana). Auto-hide en
+-- READY_CHECK_FINISHED. Layout: enable + visibility en la primera linea
+-- (regla consistente entre paginas), luego size/opacity/posicion, despues
+-- toggles per-check, finalmente botones anchor + test.
+-- Categorias de contenido para asignar loadouts. Cada loadout puede tener una
+-- o varias categorias activas (multi-select). En runtime, detectamos en cual
+-- estamos via GetInstanceInfo + C_ChallengeMode y buscamos el loadout cuyo
+-- flag para esa categoria este encendido.
+local TALENT_CONTENT_TYPES = {
+    { key = "raid",    labelKey = "Raid"          },
+    { key = "mplus",   labelKey = "Mythic+"       },
+    { key = "dungeon", labelKey = "Dungeon"       },
+    { key = "pvp",     labelKey = "PvP"           },
+    { key = "delve",   labelKey = "Delve"         },
+}
+
+-- Row visual para un loadout en el listado de la tab Talents. Estilo basado
+-- en SpellRow/CursorAuraRow (backdrop con borde, hijos en linea horizontal).
+local function LoadoutRow(parent, configID, name, stored)
+    local r = CreateFrame("Frame", nil, parent, "BackdropTemplate")
+    r:SetHeight(34)
+    r:SetBackdrop({bgFile="Interface\\Tooltips\\UI-Tooltip-Background",edgeFile="Interface\\Tooltips\\UI-Tooltip-Border",tile=true,tileSize=16,edgeSize=12,insets={left=2,right=2,top=2,bottom=2}})
+    r:SetBackdropColor(0.1,0.1,0.15,0.7); r:SetBackdropBorderColor(0.4,0.4,0.5,0.6)
+
+    local nt = r:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    nt:SetPoint("LEFT", r, "LEFT", 10, 0); nt:SetWidth(170); nt:SetJustifyH("LEFT"); nt:SetWordWrap(false)
+    nt:SetText(name)
+    nt:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+
+    -- Migration: old CSV format (string) -> new table format. Drop el CSV; el
+    -- user re-asigna via checkboxes (no intentamos parsear nombres viejos).
+    local key = tostring(configID)
+    if type(stored[key]) ~= "table" then stored[key] = {} end
+    local data = stored[key]
+
+    local xOff = 188
+    for _, ct in ipairs(TALENT_CONTENT_TYPES) do
+        local ck = CreateFrame("CheckButton", nil, r, "UICheckButtonTemplate")
+        ck:SetSize(18, 18)
+        ck:SetPoint("LEFT", r, "LEFT", xOff, 0)
+        SkinCheck(ck)
+        ck:SetChecked(data[ct.key] == true)
+        ck:SetScript("OnClick", function(self)
+            data[ct.key] = self:GetChecked() and true or nil
+        end)
+        local lbl = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        lbl:SetPoint("LEFT", ck, "RIGHT", 4, 0)
+        lbl:SetText(ns.L[ct.labelKey] or ct.labelKey)
+        xOff = xOff + 78
+    end
+    return r
+end
+
+-- Build the "Talents" tab. Lista todos los talent loadouts del spec activo
+-- (via C_ClassTalents.GetConfigIDsBySpecID + C_Traits.GetConfigInfo) y para
+-- cada uno expone checkboxes Raid/M+/Dungeon/PvP/Delve. La asignacion se
+-- persiste en ns.db.readyCheckPanel.talentLoadouts[configID][contentType] = true.
+local function BuildReadyCheckTalentsTab(parent, C1, C2)
+    local intro = parent:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    intro:SetPoint("TOPLEFT", C1, -4); intro:SetWidth(560); intro:SetJustifyH("LEFT")
+    intro:SetText(ns.L["Select the content type(s) where each loadout should be used. The panel warns at ready check if you're on the wrong one."])
+
+    local specHdr = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    specHdr:SetPoint("TOPLEFT", C1, -36)
+
+    local refreshBtn = Btn(parent, ns.L["Refresh"], 90, 22)
+    refreshBtn:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -16, -32)
+
+    -- Lista de loadouts (estilo SpellRow/CursorAuraRow).
+    local container = CreateFrame("Frame", nil, parent)
+    container:SetPoint("TOPLEFT", parent, "TOPLEFT", C1, -64)
+    container:SetPoint("RIGHT", parent, "RIGHT", -16, 0)
+
+    local function RefreshUI()
+        ClearListContainer(container)
+
+        local specIndex = GetSpecialization and GetSpecialization()
+        local specID, specName
+        if specIndex and GetSpecializationInfo then
+            local id, n = GetSpecializationInfo(specIndex)
+            specID, specName = id, n
+        end
+        specHdr:SetText((ns.L["Current spec"] or "Current spec") .. ": " .. (specName or "?"))
+
+        if not specID then container:SetHeight(30); return end
+        local configs = (C_ClassTalents and C_ClassTalents.GetConfigIDsBySpecID
+            and C_ClassTalents.GetConfigIDsBySpecID(specID)) or {}
+
+        ns.db.readyCheckPanel.talentLoadouts = ns.db.readyCheckPanel.talentLoadouts or {}
+        local stored = ns.db.readyCheckPanel.talentLoadouts
+
+        if #configs == 0 then
+            local empty = container:CreateFontString(nil, "OVERLAY", "GameFontDisable")
+            empty:SetPoint("TOPLEFT", container, "TOPLEFT", 5, -8)
+            empty:SetText(ns.L["No saved loadouts for this spec"] or "No saved loadouts for this spec")
+            container:SetHeight(30)
+            return
+        end
+
+        local n = 0
+        for _, cid in ipairs(configs) do
+            local info = C_Traits and C_Traits.GetConfigInfo and C_Traits.GetConfigInfo(cid)
+            local nm = info and info.name
+            if nm and nm ~= "" then
+                local row = LoadoutRow(container, cid, nm, stored)
+                row:SetPoint("TOPLEFT", container, "TOPLEFT", 3, -3 - n*38)
+                row:SetPoint("RIGHT", container, "RIGHT", -3, 0)
+                n = n + 1
+            end
+        end
+        container:SetHeight(n*38 + 6)
+    end
+
+    refreshBtn:SetScript("OnClick", RefreshUI)
+    parent:SetScript("OnShow", RefreshUI)
+    RefreshUI()
+end
+
+local function BuildReadyCheckPanelPage(p)
+    local C1,C2=20,340
+    local hd=H(p,ns.L["Ready Check Panel"]); hd:SetPoint("TOPLEFT",8,-8)
+
+    -- Enable checkbox removido — vive en General > Habilitar Funciones.
+    -- Visibility dropdown tambien removido: el panel SOLO aparece durante
+    -- READY_CHECK event (auto-hide en READY_CHECK_FINISHED), nunca en otro
+    -- contexto. El filtro combat/out-of-combat no aporta valor.
+
+    -- Anchor + Test buttons en la misma linea que el Enable checkbox, alineados
+    -- a la derecha del page — no dependen del tab activo. El user los queria
+    -- siempre visibles sin importar en que tab este.
+    local testBtn=Btn(p,ns.L["Test panel"],110,22); testBtn:SetPoint("TOPRIGHT",p,"TOPRIGHT",-16,-34)
+    testBtn:SetScript("OnClick",function() ns:TestReadyCheckPanel() end)
+    local anchorBtn=Btn(p,ns.L["Show anchor"],110,22); anchorBtn:SetPoint("RIGHT",testBtn,"LEFT",-6,0)
+    local function RefreshAnchorLabel()
+        anchorBtn:SetText(ns:IsReadyCheckPanelAnchorShown() and ns.L["Hide anchor"] or ns.L["Show anchor"])
+    end
+    anchorBtn:SetScript("OnClick",function() ns:ToggleReadyCheckPanelAnchor(); RefreshAnchorLabel() end)
+    RefreshAnchorLabel()
+
+    -- Tab host debajo del checkbox enable. CreateModalTabs ancla TOPLEFT(0,0)
+    -- del parent, asi que usamos un sub-frame para no pisar el header.
+    local tabHost = CreateFrame("Frame", nil, p)
+    tabHost:SetPoint("TOPLEFT", p, "TOPLEFT", 0, -72)
+    tabHost:SetPoint("BOTTOMRIGHT", p, "BOTTOMRIGHT", 0, 0)
+    local tabs, _ShowTab, SetTabEnabled = CreateModalTabs(tabHost, {
+        ns.L["General"],
+        ns.L["Items to check"],
+        ns.L["Talents"],
+    })
+    local tGeneral, tItems, tTalents = tabs[1], tabs[2], tabs[3]
+
+    -- Aplica el estado disabled inicial a los tabs Items (idx 2) y Talents
+    -- (idx 3) segun el master toggle en categoriesEnabled. Tab General (idx 1)
+    -- siempre habilitada — no tiene master toggle.
+    local function ApplyCategoryStyles()
+        local ce = ns.db.readyCheckPanel.categoriesEnabled or {}
+        SetTabEnabled(2, ce.items ~= false)
+        SetTabEnabled(3, ce.talents ~= false)
+    end
+
+    -- ===== Tab: General (size/appearance/position/buttons) =====
+    do
+        local y=-4
+        local sh=SubH(tGeneral,ns.L["Size & Appearance"]); sh:SetPoint("TOPLEFT",C1,y); local c1y=y-20
+        local defs1={
+            {ns.L["Panel Width"],160,500,5,function() return ns.db.readyCheckPanel.width end,function(v) ns.db.readyCheckPanel.width=v; ns:RefreshReadyCheckPanel() end},
+            {ns.L["Row Height"],16,40,1,function() return ns.db.readyCheckPanel.rowHeight end,function(v) ns.db.readyCheckPanel.rowHeight=v; ns:RefreshReadyCheckPanel() end},
+            {ns.L["Font Scale"],0.8,2.5,0.05,function() return ns.db.readyCheckPanel.fontScale or 1.0 end,function(v) ns.db.readyCheckPanel.fontScale=v; ns:RefreshReadyCheckPanel() end},
+            {ns.L["Opacity"],0.1,1.0,0.05,function() return ns.db.readyCheckPanel.opacity end,function(v) ns.db.readyCheckPanel.opacity=v; ns:RefreshReadyCheckPanel() end},
+        }
+        for _,d in ipairs(defs1) do local s=CreateSlider(tGeneral,d[1],d[2],d[3],d[4],d[5],d[6]); s:SetPoint("TOPLEFT",C1,c1y); table.insert(allSliders,s); c1y=c1y-48 end
+
+        local ph=SubH(tGeneral,ns.L["Position"]); ph:SetPoint("TOPLEFT",C2,y); local c2y=y-20
+        local defs2={
+            {ns.L["Offset X"],-600,600,5,function() return ns.db.readyCheckPanel.offsetX end,function(v) ns.db.readyCheckPanel.offsetX=v; ns:RefreshReadyCheckPanel() end},
+            {ns.L["Offset Y"],-400,400,5,function() return ns.db.readyCheckPanel.offsetY end,function(v) ns.db.readyCheckPanel.offsetY=v; ns:RefreshReadyCheckPanel() end},
+        }
+        for _,d in ipairs(defs2) do local s=CreateSlider(tGeneral,d[1],d[2],d[3],d[4],d[5],d[6]); s:SetPoint("TOPLEFT",C2,c2y); table.insert(allSliders,s); c2y=c2y-48 end
+
+        -- Master toggles per categoria. Apagar uno pone gris el nombre del
+        -- tab correspondiente y skipea sus checks en el panel runtime. Util
+        -- para esconder secciones enteras sin tocar los toggles individuales.
+        local catY = math.min(c1y, c2y) - 8
+        local sh2 = SubH(tGeneral, ns.L["Enabled menus"] or "Enabled menus"); sh2:SetPoint("TOPLEFT", C1, catY); catY = catY - 20
+        local cbItems = CreateCheckbox(tGeneral, ns.L["Items to check"],
+            function() return (ns.db.readyCheckPanel.categoriesEnabled or {}).items ~= false end,
+            function(v)
+                ns.db.readyCheckPanel.categoriesEnabled = ns.db.readyCheckPanel.categoriesEnabled or {}
+                ns.db.readyCheckPanel.categoriesEnabled.items = v and true or false
+                ApplyCategoryStyles()
+                ns:RefreshReadyCheckPanel()
+            end)
+        cbItems:SetPoint("TOPLEFT", C1, catY); table.insert(allCheckboxes, cbItems)
+        local cbTalents = CreateCheckbox(tGeneral, ns.L["Talents"],
+            function() return (ns.db.readyCheckPanel.categoriesEnabled or {}).talents ~= false end,
+            function(v)
+                ns.db.readyCheckPanel.categoriesEnabled = ns.db.readyCheckPanel.categoriesEnabled or {}
+                ns.db.readyCheckPanel.categoriesEnabled.talents = v and true or false
+                ApplyCategoryStyles()
+                ns:RefreshReadyCheckPanel()
+            end)
+        cbTalents:SetPoint("TOPLEFT", C2, catY); table.insert(allCheckboxes, cbTalents)
+        -- Estilo inicial de los tabs segun el estado guardado.
+        ApplyCategoryStyles()
+    end
+
+    -- ===== Tab: Items to check (per-check toggles) =====
+    do
+        local cy=-4
+        local checkDefs = {
+            { ns.L["Show talents banner"], "infoTalents"       },
+            { ns.L["Well Fed"],            "checkWellFed"      },
+            { ns.L["Flask / Phial"],       "checkFlask"        },
+            { ns.L["Augment Rune"],        "checkAugmentRune"  },
+            { ns.L["Class buffs (party-aware)"], "checkClassBuffs" },
+            { ns.L["Weapon Imbue"],         "checkClassImbue"   },
+            { ns.L["Healthstone"],          "checkHealthstone"  },
+            { ns.L["Loadout"],              "checkTalentLoadout"},
+            { ns.L["Check your mana"],     "checkResourceFull" },
+        }
+        local col1y, col2y = cy, cy
+        for i, def in ipairs(checkDefs) do
+            local label, key = def[1], def[2]
+            local cb=CreateCheckbox(tItems,label,
+                function() return ns.db.readyCheckPanel[key] end,
+                function(v) ns.db.readyCheckPanel[key]=v; ns:RefreshReadyCheckPanel() end)
+            if i % 2 == 1 then
+                cb:SetPoint("TOPLEFT",C1,col1y); col1y=col1y-26
+            else
+                cb:SetPoint("TOPLEFT",C2,col2y); col2y=col2y-26
+            end
+            table.insert(allCheckboxes,cb)
+        end
+    end
+
+    -- ===== Tab: Talents (loadouts × instance assignments) =====
+    do
+        BuildReadyCheckTalentsTab(tTalents, C1, C2)
+    end
+end
+
 local function BuildGeneralPage(p)
     HNZHealingToolsDB.general = HNZHealingToolsDB.general or {}
     local g = HNZHealingToolsDB.general
@@ -3778,6 +4059,45 @@ local function BuildGeneralPage(p)
 
     local reloadBtn = Btn(p, ns.L["Reload UI"], 130, 24); reloadBtn:SetPoint("TOPLEFT", C1, y)
     reloadBtn:SetScript("OnClick", function() if ReloadUI then ReloadUI() end end)
+    y = y - 38
+
+    -- Features section: toggles per-modulo. Apagar uno pone el nombre del menu
+    -- del sidebar en plomo y deshabilita la feature (cada modulo respeta su
+    -- propio .enabled flag al renderizar). Llamamos ns._RefreshConfigMenuStyles
+    -- despues del toggle para que el sidebar refleje el cambio en vivo.
+    local sh = SubH(p, ns.L["Enable features"] or "Enable features"); sh:SetPoint("TOPLEFT", C1, y); y = y - 22
+
+    -- refresh: nombre del metodo en `ns` que el modulo expone para re-evaluar
+    -- su visibility. Algunos modulos cachean la decision (CursorDisplay via
+    -- ApplyCursorVisibility) y necesitan ser pateados manualmente; otros leen
+    -- el flag cada tick (MrtTimeline) y no necesitan refresh explicito. Si el
+    -- metodo no existe, skipeamos sin error.
+    local FEATURE_TOGGLES = {
+        { key = "cursorDisplay",   labelKey = "Cursor",      refresh = "RefreshCursorDisplay" },
+        { key = "ringDisplay",     labelKey = "Ring",        refresh = "RefreshRingDisplay"   },
+        { key = "cooldownPulse",   labelKey = "Pulse",       refresh = "RefreshCooldownPulse" },
+        { key = "cursorRing",      labelKey = "Cursor Ring", refresh = "RefreshCursorRing"    },
+        { key = "mrtTimeline",     labelKey = "MRT / NSRT"  },
+        { key = "readyCheckPanel", labelKey = "Ready Check", refresh = "RefreshReadyCheckPanel" },
+    }
+    for _, ft in ipairs(FEATURE_TOGGLES) do
+        if ns.db[ft.key] then
+            local cb = CreateCheckbox(p, ns.L[ft.labelKey] or ft.labelKey,
+                function() return ns.db[ft.key].enabled ~= false end,
+                function(v)
+                    ns.db[ft.key].enabled = v and true or false
+                    if ns._RefreshConfigMenuStyles then ns._RefreshConfigMenuStyles() end
+                    if ns._RefreshConfigPageEnabled then ns._RefreshConfigPageEnabled() end
+                    -- Llamar al refresh del modulo para que aplique el nuevo
+                    -- estado enabled inmediatamente (sin esperar al proximo
+                    -- event que dispare ApplyCursorVisibility u equivalente).
+                    if ft.refresh and ns[ft.refresh] then ns[ft.refresh](ns) end
+                end)
+            cb:SetPoint("TOPLEFT", C1, y)
+            table.insert(allCheckboxes, cb)
+            y = y - 22
+        end
+    end
 end
 
 -- Modales de Export / Import de perfiles. Se construyen lazy y se reutilizan
@@ -4496,32 +4816,37 @@ function ns:CreateConfigWindow()
     ca:SetPoint("TOPLEFT",mbg,"TOPRIGHT",8,0); ca:SetPoint("BOTTOMRIGHT",-10,10)
     SubPanelBackdrop(ca, 0.3)
 
+    -- General y Profiles son utilities sin "enable" master. El resto tiene
+    -- enabledKey apuntando al sub-table de ns.db donde vive el flag .enabled
+    -- — el sidebar muestra un checkbox al lado del nombre que togglea ese flag,
+    -- y si esta off el texto del menu va en plomo.
     local pageDefs={
-        {name=ns.L["Cursor"], subtabs={
+        {name=ns.L["General"],       builder=BuildGeneralPage},
+        {name=ns.L["Cursor"], enabledKey="cursorDisplay", subtabs={
             {name=ns.L["Spells"], builder=BuildCursorSpellsPage},
             {name=ns.L["Auras"],  builder=BuildCursorAurasPage},
             {name=ns.L["Config"], builder=BuildCursorSettingsPage},
         }},
-        {name=ns.L["Ring"], subtabs={
+        {name=ns.L["Ring"], enabledKey="ringDisplay", subtabs={
             {name=ns.L["Auras"],  builder=BuildRingAurasPage},
             {name=ns.L["Config"], builder=BuildRingSettingsPage},
         }},
-        {name=ns.L["Pulse"], subtabs={
+        {name=ns.L["Pulse"], enabledKey="cooldownPulse", subtabs={
             {name=ns.L["Spells"], builder=BuildPulseSpellsPage},
             {name=ns.L["Auras"],  builder=BuildPulseAurasPage},
             {name=ns.L["Config"], builder=BuildCooldownPulsePage},
         }},
-        {name=ns.L["Cursor Ring"], subtabs={
+        {name=ns.L["Cursor Ring"], enabledKey="cursorRing", subtabs={
             {name=ns.L["Ring"], builder=BuildCursorRingMainPage},
             {name=ns.L["Cast"], builder=BuildCursorRingCastPage},
             {name=ns.L["Dot"],  builder=BuildCursorRingDotPage},
         }},
-        {name=ns.L["MRT / NSRT"], subtabs={
+        {name=ns.L["MRT / NSRT"], enabledKey="mrtTimeline", subtabs={
             {name=ns.L["Encounters"], builder=BuildMrtEncountersPage},
             {name=ns.L["Config"],     builder=BuildMrtConfigPage},
         }},
+        {name=ns.L["Ready Check"],   enabledKey="readyCheckPanel", builder=BuildReadyCheckPanelPage},
         {name=ns.L["Macros"],        builder=BuildMacrosPage},
-        {name=ns.L["General"],       builder=BuildGeneralPage},
         {name=ns.L["Profiles"],      builder=BuildProfilesPage},
     }
 
@@ -4604,17 +4929,61 @@ function ns:CreateConfigWindow()
                 pages[i]=MakeScrollPage(ca, def.builder, 0)
             end
         end
+
+        -- Overlay deshabilitado: para cada page cuyo def tenga enabledKey,
+        -- montamos una capa semi-transparente que bloquea TODOS los clicks
+        -- dentro del page cuando ns.db[key].enabled == false. Mensaje centrado
+        -- indica donde re-habilitar. La capa se toggle desde RefreshPageOverlays
+        -- cuando el user togglea el checkbox en la page General.
+        for i, def in ipairs(pageDefs) do
+            if def.enabledKey and pages[i] then
+                local pg = pages[i]
+                local overlay = CreateFrame("Frame", nil, pg)
+                overlay:SetAllPoints(pg)
+                overlay:EnableMouse(true)
+                overlay:SetFrameLevel((pg:GetFrameLevel() or 0) + 50)
+                local bg = overlay:CreateTexture(nil, "BACKGROUND")
+                bg:SetAllPoints(); bg:SetColorTexture(0, 0, 0, 0.55)
+                local msg = overlay:CreateFontString(nil, "OVERLAY", "GameFontHighlightLarge")
+                msg:SetPoint("CENTER")
+                msg:SetText(ns.L["Feature disabled — enable in General > Habilitar Funciones"]
+                    or "Feature disabled — enable in General > Habilitar Funciones")
+                msg:SetTextColor(0.9, 0.9, 0.9)
+                overlay:Hide()
+                pg._disabledOverlay = overlay
+            end
+        end
     end
     BuildAllPages()
+
+    local function RefreshPageOverlays()
+        for i, pg in ipairs(pages) do
+            if pg and pg._disabledOverlay then
+                local def = pageDefs[i]
+                local disabled = def and def.enabledKey and ns.db[def.enabledKey]
+                    and ns.db[def.enabledKey].enabled == false
+                pg._disabledOverlay:SetShown(disabled)
+            end
+        end
+    end
+    RefreshPageOverlays()
+    ns._RefreshConfigPageEnabled = RefreshPageOverlays
 
     local function StyleMenuBtn(btn, active)
         if active then
             btn:SetBackdropColor(C_HOVER.r, C_HOVER.g, C_HOVER.b, 0.6)
             if btn.accent then btn.accent:Show() end
-            btn.Text:SetTextColor(C_ACCENT.r, C_ACCENT.g, C_ACCENT.b)
         else
             btn:SetBackdropColor(0,0,0,0)
             if btn.accent then btn.accent:Hide() end
+        end
+        -- Text color: btn._disabled (feature off) gana sobre el resto y pinta
+        -- plomo. Si no esta disabled, sigue la regla active/inactive normal.
+        if btn._disabled then
+            btn.Text:SetTextColor(0.5, 0.5, 0.5)
+        elseif active then
+            btn.Text:SetTextColor(C_ACCENT.r, C_ACCENT.g, C_ACCENT.b)
+        else
             btn.Text:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
         end
     end
@@ -4646,6 +5015,7 @@ function ns:CreateConfigWindow()
         mrtNotesC = nil
         pulseSpellListC, pulseAuraListC = nil, nil
         BuildAllPages()
+        RefreshPageOverlays()
         ShowPage(activeIdx)
     end
     ns._RebuildConfigPages = RebuildAllPages
@@ -4658,8 +5028,18 @@ function ns:CreateConfigWindow()
         -- Barra de acento a la izquierda (visible cuando la pestaña está activa)
         btn.accent=btn:CreateTexture(nil,"OVERLAY"); btn.accent:SetPoint("TOPLEFT",0,0); btn.accent:SetPoint("BOTTOMLEFT",0,0); btn.accent:SetWidth(3)
         btn.accent:SetColorTexture(C_ACCENT.r, C_ACCENT.g, C_ACCENT.b, 1); btn.accent:Hide()
+
+        -- Estado disabled inicial leyendo el flag enabled del db. Los checkboxes
+        -- para togglear este flag viven en la page General (ver BuildGeneralPage)
+        -- — el sidebar solo muestra el estado en gris/normal. Cambios desde
+        -- General disparan ns._RefreshConfigMenuStyles que actualiza btn._disabled.
+        if def.enabledKey and ns.db[def.enabledKey] then
+            btn._disabled = ns.db[def.enabledKey].enabled == false
+        end
+
         btn.Text=btn:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall"); btn.Text:SetPoint("LEFT",14,0); btn.Text:SetText(def.name)
         btn.Text:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+        if btn._disabled then btn.Text:SetTextColor(0.5, 0.5, 0.5) end
         btn:SetScript("OnEnter",function(s) if not s._active then s:SetBackdropColor(C_HOVER.r, C_HOVER.g, C_HOVER.b, 0.4) end end)
         btn:SetScript("OnLeave",function(s) if not s._active then s:SetBackdropColor(0,0,0,0) end end)
         btn:SetScript("OnClick",function()
@@ -4667,6 +5047,20 @@ function ns:CreateConfigWindow()
             ShowPage(i)
         end)
         menuButtons[i]=btn
+    end
+
+    -- Helper expuesto a BuildGeneralPage: re-lee los flags enabled y re-styla
+    -- los botones del sidebar. Llamado tras cada toggle en la page General.
+    ns._RefreshConfigMenuStyles = function()
+        for i, b in ipairs(menuButtons) do
+            local def = pageDefs[i]
+            if def and def.enabledKey and ns.db[def.enabledKey] then
+                b._disabled = ns.db[def.enabledKey].enabled == false
+            else
+                b._disabled = nil
+            end
+            StyleMenuBtn(b, b._active)
+        end
     end
 
     mainWindow:SetScript("OnShow",function()

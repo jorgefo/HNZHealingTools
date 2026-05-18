@@ -211,7 +211,7 @@ ns.PROFILE_DEFAULTS = {
     -- MRT Timeline Reminders: lee VMRT.Note.Text1 y muestra iconos de hechizos
     -- cerca del cursor cuando se acerca el tiempo configurado en la nota.
     mrtTimeline = {
-        enabled = false,
+        enabled = true,
         iconSize = 40,
         offsetX = 0,
         offsetY = 60,
@@ -232,9 +232,67 @@ ns.PROFILE_DEFAULTS = {
         soundName = "Default",
         soundChannel = "Master",
     },
+    -- Ready Check preparation panel: cuando alguien dispara un /readycheck, el
+    -- addon muestra un panel flotante con un checklist visual del estado del
+    -- player (food, flask, runa, HP/mana lleno). Auto-hide en READY_CHECK_FINISHED.
+    -- Cada `check*` es un toggle on/off para que el usuario apague items que no
+    -- aplican a su clase (p.ej. checkResourceFull para specs sin mana). Pensado
+    -- para healers pero util para cualquier rol.
+    readyCheckPanel = {
+        enabled = true,
+        visibility = "always",       -- "always" | "combat" | "ooc"
+        offsetX = 0,
+        offsetY = 200,               -- arriba del centro de la pantalla por default
+        width = 320,                 -- mas ancho para acomodar sub-rows de items con nombre + count
+        rowHeight = 22,
+        subRowHeight = 18,           -- alto de los sub-rows que listan items en bag
+        opacity = 0.95,
+        fontScale = 1.0,             -- escala global de texto del panel; user-controlled via slider
+        -- Items del checklist. Toggles independientes asi el usuario apaga lo
+        -- que no le aplica (p.ej. mana para una spec sin mana). El orden de
+        -- evaluacion esta hardcoded en ReadyCheckPanel.lua (no es configurable
+        -- en v1; agregar editor de orden seria v2).
+        infoTalents = true,          -- info row: spec activa + loadout de talentos
+        checkWellFed = true,
+        checkFlask = true,           -- matchea "Phial of" o "Flask of"
+        checkAugmentRune = true,     -- matchea aura cuyo nombre contiene "Augment Rune"
+        checkResourceFull = true,    -- row "Revisa tu mana" + comidas; clases sin mana se omiten
+        checkClassBuffs = true,      -- raid buffs party-aware (Arcane Intellect, Skyfury, etc)
+        checkClassImbue = true,      -- weapon imbue self-cast (Shaman/Rogue spec spell)
+        checkHealthstone = true,     -- row con piedra del brujo + cantidad; solo si hay warlock en grupo
+        checkTalentLoadout = true,   -- row "Loadout: X" dentro de instancia; advierte si activo != configurado
+        -- Master toggles per categoria (tabs). Si una categoria esta off, el
+        -- tab correspondiente sale en plomo en Config y los checks de esa
+        -- categoria se skipean en el panel runtime (incluso aunque los toggles
+        -- individuales esten on).
+        categoriesEnabled = {
+            items = true,
+            talents = true,
+        },
+        -- Click-to-use: cuando un check falla y hay un item del kind en bags,
+        -- el row se vuelve clickeable y usa el item directamente (SecureActionButton
+        -- "/use item:ID"). Lista per-kind con itemIDs custom (prepended a los
+        -- defaults). Sin custom items y sin defaults, el row se muestra rojo
+        -- pero no es clickeable. Kinds: wellFed, flask, augmentRune, recoveryHP,
+        -- recoveryMana.
+        actionItems = {
+            wellFed = {},
+            flask = {},
+            augmentRune = {},
+            recoveryHP = {},
+            recoveryMana = {},
+            healthstone = {},
+            weaponImbue = {},
+        },
+        -- talentLoadouts[tostring(configID)] = "Manaforge, Theatre of Pain"
+        -- CSV de nombres de instancia (case-insensitive substring match) donde
+        -- ese loadout deberia estar activo. Si el nombre actual matchea un
+        -- loadout y el activo es distinto, el panel ofrece switch.
+        talentLoadouts = {},
+    },
     -- Cursor ring: anillo decorativo siguiendo al raton (estilo CursorRing)
     cursorRing = {
-        enabled = false,
+        enabled = true,
         size = 48,
         opacity = 0.8,
         offsetX = 0,
@@ -395,6 +453,7 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
         ns:InitCooldownPulse()
         ns:InitCursorRing()
         ns:InitMrtTimeline()
+        ns:InitReadyCheckPanel()
         ns:InitConfig()
         ns:InitMinimapButton()
         ns:InitPublicAPI()

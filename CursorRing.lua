@@ -146,9 +146,13 @@ local function ApplyVisuals()
 end
 
 local function ShouldBeShown(s)
-    -- El frame padre se muestra si CUALQUIER sub-feature deberia estar visible
-    -- ahora mismo, considerando cada combat-gate por separado. Asi el dot puede
-    -- mostrarse incluso si el ring decorativo esta oculto por su propio gate.
+    -- Master toggle gate: si s.enabled esta off, NADA del cursor ring se
+    -- muestra (ni ring decorativo, ni cast wedges, ni dot). Ese flag se
+    -- controla desde la page General > Habilitar Funciones y representa
+    -- el on/off del feature completo, no solo del ring.
+    if not s.enabled then return false end
+    -- Con master on, cada sub-feature (ring/cast/dot) evalua su propio gate.
+    -- El frame padre se muestra si CUALQUIERA deberia estar visible.
     return RingShouldShow(s) or FeatureShouldShow(s.cast) or FeatureShouldShow(s.dot)
 end
 

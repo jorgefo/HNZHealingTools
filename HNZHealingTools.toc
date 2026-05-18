@@ -27,6 +27,7 @@ RingDisplay.lua
 CooldownPulse.lua
 CursorRing.lua
 MrtTimeline.lua
+ReadyCheckPanel.lua
 Config.lua
 WhatsNew.lua
 Minimap.lua

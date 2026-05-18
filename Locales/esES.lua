@@ -456,4 +456,58 @@ ns.RegisterLocale("esES", {
         "  • HNZHealingTools.Trigger(key) devuelve la cantidad de entries que matchearon (0 = ninguna entry tiene esa key).",
     ["  • Combat-safe: trigger keys work during combat lockdown."] =
         "  • Combat-safe: las trigger keys funcionan durante combat lockdown.",
+
+    -- ===== Ready Check Panel (1.7.0) =====
+    ["Ready Check"]                  = "Ready Check",
+    ["Ready Check Panel"]            = "Panel de Ready Check",
+    ["Enable ready check panel"]     = "Activar panel de Ready Check",
+    ["Size & Appearance"]            = "Tamaño y aspecto",
+    ["Panel Width"]                  = "Ancho del panel",
+    ["Row Height"]                   = "Alto de fila",
+    ["Font Scale"]                   = "Escala de texto",
+    ["more"]                         = "más",
+    ["Items to check"]               = "Items a verificar",
+    ["Talents"]                      = "Talentos",
+    ["Show talents banner"]          = "Mostrar banner de talentos",
+    ["Well Fed"]                     = "Bien Alimentado",
+    ["Flask / Phial"]                = "Frasco / Filtro",
+    ["Augment Rune"]                 = "Runa de aumento",
+    ["Check your mana"]              = "Revisa tu maná",
+    ["Class buffs (party-aware)"]    = "Bufos de clase (según grupo)",
+    ["Weapon Imbue"]                 = "Encantamiento de arma",
+    ["Healthstone"]                  = "Piedra de salud",
+    ["General"]                      = "General",
+    ["Talents"]                      = "Talentos",
+    ["Enabled menus"]                = "Menús habilitados",
+    ["Features"]                     = "Funciones",
+    ["Enable features"]              = "Habilitar Funciones",
+    ["Feature disabled — enable in General > Habilitar Funciones"] =
+        "Función deshabilitada — actívala en General > Habilitar Funciones",
+    ["Current spec"]                 = "Especialización activa",
+    ["Refresh"]                      = "Refrescar",
+    ["No saved loadouts for this spec"] = "Sin loadouts guardados para esta especialización",
+    ["Select the content type(s) where each loadout should be used. The panel warns at ready check if you're on the wrong one."] =
+        "Selecciona en qué tipo(s) de contenido se debe usar cada loadout. El panel avisa en el ready check si no estás en el correcto.",
+    ["Wrong loadout"]                = "Loadout incorrecto",
+    ["Switch"]                       = "Cambiar",
+    ["Loadout"]                      = "Loadout",
+    ["Can't switch loadout in combat."] = "No se puede cambiar de loadout en combate.",
+    ["Raid"]                         = "Banda",
+    ["Mythic+"]                      = "Mítica+",
+    ["Dungeon"]                      = "Mazmorra",
+    ["PvP"]                          = "JcJ",
+    ["Delve"]                        = "Expedición",
+    ["Cast"]                         = "Lanzar",
+    ["Ask"]                          = "Pedir",
+    ["(eating)"]                     = "(comiendo)",
+    ["No items in bag"]              = "Sin items en la mochila",
+    -- NOTA: los labels de los class buffs (Skyfury -> Abrasacielos, etc.) se
+    -- resuelven en runtime via C_Spell.GetSpellInfo(spellID).name, asi que NO
+    -- necesitamos traducirlos aqui. WoW devuelve el nombre oficial del juego
+    -- en el idioma del cliente. Las entries Power Word: Fortitude / Arcane
+    -- Intellect / Battle Shout / Mark of the Wild / Skyfury / Blessing of the
+    -- Bronze solo se usan como fallback enUS si la API falla.
+    ["Test panel"]                   = "Probar panel",
+    ["Buff detection currently assumes English buff names. Localized clients may see false negatives."] =
+        "La detección de buffs asume nombres en inglés. Los clientes localizados pueden ver falsos negativos.",
 })

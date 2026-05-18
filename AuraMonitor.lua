@@ -61,6 +61,12 @@ local function SiphonNumber(val)
     return tonumber(fs:GetText() or "")
 end
 
+-- Exponer para otros modulos (ReadyCheckPanel usa esto para UnitHealth/UnitPower
+-- durante READY_CHECK, contexto donde la API retorna SecureNumber irrecuperable
+-- via ToPublic). AuraMonitor.lua se carga antes que ReadyCheckPanel.lua segun
+-- el .toc, asi que ns.SiphonNumber esta disponible cuando ReadyCheckPanel inicia.
+ns.SiphonNumber = SiphonNumber
+
 -- Lee la cantidad de stacks de un cdm frame post-mixin-update. Blizzard ya pinto
 -- el Count FontString via SetText(applications) — incluso si el valor es
 -- SecureNumber, el FontString almacena el render como string que podemos parsear.
