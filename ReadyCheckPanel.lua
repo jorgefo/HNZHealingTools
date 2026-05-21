@@ -864,7 +864,7 @@ table.insert(CHECKS, {
 -- activo no matchea, ofrece boton Switch.
 table.insert(CHECKS, {
     key             = "checkTalentLoadout",
-    labelKey        = "Loadout",
+    labelKey        = "Talent Build",
     fn              = CheckTalentLoadout,
     isTalentLoadout = true,
     category        = "talents",
@@ -1295,7 +1295,33 @@ local function CreatePanelFrame()
     f:SetSize(s.width or 280, 100)
     f:SetPoint("CENTER", UIParent, "CENTER", s.offsetX or 0, s.offsetY or 200)
     f:SetClampedToScreen(true)
-    f:EnableMouse(false)
+    -- EnableMouse(true) para capturar drag. Los click-to-use buttons de los
+    -- sub-rows son children con OnClick propio — Blizzard les da prioridad de
+    -- input, asi que un click en un boton se consume ahi sin disparar drag del
+    -- panel. Drag solo se activa cuando el user clickea-y-arrastra una zona sin
+    -- handler propio (titulo, fondo, paddings).
+    f:EnableMouse(true)
+    f:SetMovable(true)
+    f:RegisterForDrag("LeftButton")
+    f:SetScript("OnDragStart", function(self) self:StartMoving() end)
+    f:SetScript("OnDragStop", function(self)
+        self:StopMovingOrSizing()
+        -- Persistir nueva posicion relativa a UIParent CENTER. StartMoving
+        -- cambia el anchor a UIParent BOTTOMLEFT, asi que computamos delta
+        -- via centers para conservar el contrato del config (offset desde
+        -- center de pantalla).
+        local cx, cy = self:GetCenter()
+        local pcx, pcy = UIParent:GetCenter()
+        local cfg = GetSettings()
+        if cx and pcx and cfg then
+            cfg.offsetX = math.floor((cx - pcx) + 0.5)
+            cfg.offsetY = math.floor((cy - pcy) + 0.5)
+            -- Re-anchor a CENTER+offsets para que sobreviva resizes de UIParent
+            -- y refrescos posteriores.
+            self:ClearAllPoints()
+            self:SetPoint("CENTER", UIParent, "CENTER", cfg.offsetX, cfg.offsetY)
+        end
+    end)
     f:Hide()
 
     f:SetBackdrop({
@@ -1590,18 +1616,18 @@ Render = function()
                     if row.time then row.time:SetText("") end
                     row.icon:SetTexCoord(0, 1, 0, 1)
                     if result.mode == "wrong" then
-                        row.label:SetText((ns.L["Wrong loadout"] or "Wrong loadout")
+                        row.label:SetText((ns.L["Wrong talent build"] or "Wrong talent build")
                             .. ": " .. result.activeName .. " \194\187 " .. result.expectedName)
                         row.label:SetTextColor(1.0, 0.7, 0.35)
                         row.icon:SetTexture(NOT_READY_TEX)
                         row.icon:SetVertexColor(1, 1, 1)
                     elseif result.mode == "match" then
-                        row.label:SetText((ns.L["Loadout"] or "Loadout") .. ": " .. result.activeName)
+                        row.label:SetText((ns.L["Talent Build"] or "Talent Build") .. ": " .. result.activeName)
                         row.label:SetTextColor(0.55, 1.0, 0.55)
                         row.icon:SetTexture(READY_TEX)
                         row.icon:SetVertexColor(1, 1, 1)
                     else
-                        row.label:SetText((ns.L["Loadout"] or "Loadout") .. ": " .. result.activeName)
+                        row.label:SetText((ns.L["Talent Build"] or "Talent Build") .. ": " .. result.activeName)
                         row.label:SetTextColor(1, 1, 1)
                         row.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
                         row.icon:SetTexture("Interface\\Icons\\INV_Misc_Book_07")
@@ -1999,6 +2025,12 @@ end
 function ns:IsReadyCheckPanelAnchorShown()
     return ns._readyCheckAnchor and ns._readyCheckAnchor:IsShown() or false
 end
+
+-- Expuesto para que otros modulos (p.ej. VendorRestock) reusen las mismas
+-- listas hardcoded de itemIDs por kind sin duplicarlas. NO mutar — copiar
+-- antes de modificar. Las listas vivan canonicamente aqui porque este modulo
+-- ya las cura por temporada.
+ns.RC_DEFAULT_USE_ITEMS = DEFAULT_USE_ITEMS
 
 -- ============================================================
 -- Init: events + polling

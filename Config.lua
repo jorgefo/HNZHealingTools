@@ -42,6 +42,59 @@ function ns:InitConfig()
                         tostring(a.sourceUnit)))
                 end
             end
+        elseif cmd == "vendor" or cmd == "auction" or cmd == "ah" then
+            -- Dump diagnostico del modulo AuctionRestock (storage key
+            -- legacy: vendorRestock). Util para confirmar enabled / items
+            -- configurados / si el AH esta abierto / commodity API disponible.
+            local s = ns.db and ns.db.vendorRestock
+            print("|cff00ccffHNZ|r Auction Restock diagnostic:")
+            if not s then print("  vendorRestock config: |cffff5555NIL|r"); return end
+            print(string.format("  enabled=%s  visibility=%s  items=%d  confirmAbove=%dg",
+                tostring(s.enabled), tostring(s.visibility),
+                s.items and #s.items or -1,
+                math.floor((s.confirmAbove or 0) / 10000)))
+            local ahf = _G.AuctionHouseFrame
+            print(string.format("  AuctionHouseFrame shown: %s   C_AuctionHouse api: %s",
+                tostring(ahf and ahf:IsShown() and true or false),
+                tostring(C_AuctionHouse ~= nil)))
+            if s.items and #s.items > 0 then
+                print("  configured items:")
+                for i, e in ipairs(s.items) do
+                    local name = ns.GetItemDisplayInfo and ns.GetItemDisplayInfo(e.itemID or 0) or "?"
+                    local have = (GetItemCount and GetItemCount(e.itemID, false, false, false, false)) or 0
+                    print(string.format("    [%d] id=%d %s  want=%s have=%d  maxPrice=%dg  enabled=%s  lastPaid=%s",
+                        i, e.itemID or 0, name, tostring(e.target), have,
+                        math.floor((e.maxPrice or 0)/10000), tostring(e.enabled),
+                        tostring(e.lastPaid)))
+                end
+            else
+                print("  |cffffcc44No items configured.|r Open /hht > Auction and add items via 'Add Item...' or drag.")
+            end
+            -- Si el AH esta abierto, mostramos resultados commodity cached
+            -- por itemID (lo que el modulo ya tiene de busquedas previas).
+            if ahf and ahf:IsShown() and C_AuctionHouse
+               and C_AuctionHouse.GetCommoditySearchResultsQuantity then
+                print("  current AH commodity prices (cheapest):")
+                for _, e in ipairs(s.items or {}) do
+                    local id = e.itemID
+                    if id then
+                        local total = C_AuctionHouse.GetCommoditySearchResultsQuantity(id) or 0
+                        local price = 0
+                        if total > 0 and C_AuctionHouse.GetCommoditySearchResultInfo then
+                            local info = C_AuctionHouse.GetCommoditySearchResultInfo(id, 1)
+                            price = (info and info.unitPrice) or 0
+                        end
+                        local name = ns.GetItemDisplayInfo and ns.GetItemDisplayInfo(id) or ("item:"..id)
+                        local color = (total == 0) and "|cffff5555"
+                                      or (e.maxPrice and e.maxPrice > 0 and price > e.maxPrice and "|cffffcc44"
+                                      or "|cff66ff66")
+                        print(string.format("    %s[id=%d] %s  qty=%d  unit=%dg|r",
+                            color, id, name, total, math.floor(price/10000)))
+                    end
+                end
+            else
+                print("  |cffcccccc(Open the auction house and re-run /hht ah to inspect prices.)|r")
+            end
         elseif cmd == "trigger" then
             local key = rest and rest:match("^%s*(%S+)") or nil
             if not key or key == "" then
@@ -2516,8 +2569,181 @@ local function CreatePulseItemEditor()
     return editor
 end
 
+-- Auction Item editor: edit row de la lista vendorRestock.items (storage key
+-- legacy; el modulo ahora integra con la casa de subastas, no con vendors).
+-- Fields: itemID (BuildItemIdentityField), target (cuantos quiero en bag),
+-- maxPrice (tope unitario en gold para AH), enabled. Si la entry tiene
+-- lastPaid, lo mostramos para que el user vea el historico antes de decidir
+-- el max.
+local function CreateVendorItemEditor()
+    local f = CreateEditorFrame("HNZHealingToolsVendorItemEditor",
+        ns.L["Auction Item"] or "Auction Item", 480, 380)
+    local p = f.content
+    local editingEntry
+
+    local eb, RefreshPreview = BuildItemIdentityField(p, 400)
+
+    -- Cantidad a comprar (target en bag). EditBox numerico — el user tipea el
+    -- numero directo, default 1 al agregar.
+    local tgtLbl = p:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    tgtLbl:SetPoint("TOPLEFT", 4, -130)
+    tgtLbl:SetText(ns.L["How many to buy:"] or "How many to buy:")
+    local tgtEb = EditBox(p, 80); tgtEb:SetPoint("TOPLEFT", 4, -148)
+    tgtEb:SetNumeric(true)
+
+    -- Max precio por unidad. En GOLD por UX (el storage interno es copper).
+    -- 0 = sin tope. EditBox numerico — los precios pueden variar mucho y un
+    -- slider 0-10000 es restrictivo para items caros.
+    local mpLbl = p:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    mpLbl:SetPoint("TOPLEFT", 4, -180)
+    mpLbl:SetText(ns.L["Max price per item (gold, 0 = no limit):"] or "Max price per item (gold, 0 = no limit):")
+    local mpEb = EditBox(p, 100); mpEb:SetPoint("TOPLEFT", 4, -198)
+    mpEb:SetNumeric(true)
+
+    -- Display de lastPaid. Pintado en OpenEdit (en OpenAdd queda vacio).
+    local histLbl = p:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    histLbl:SetPoint("LEFT", mpEb, "RIGHT", 16, 0)
+    histLbl:SetJustifyH("LEFT"); histLbl:SetText("")
+
+    -- Threshold de confirmacion per-item. En GOLD. Si totalPrice del purchase
+    -- supera este monto, se muestra popup de confirmacion. 0 = auto-confirmar
+    -- siempre (sin popup).
+    local caLbl = p:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    caLbl:SetPoint("TOPLEFT", 4, -230)
+    caLbl:SetText(ns.L["Confirm above (gold, 0 = no confirmation):"] or "Confirm above (gold, 0 = no confirmation):")
+    local caEb = EditBox(p, 100); caEb:SetPoint("TOPLEFT", 4, -248)
+    caEb:SetNumeric(true)
+
+    -- Enabled toggle: si esta off, la entry no se compra (pero queda guardada).
+    local enCk = CreateFrame("CheckButton", nil, p, "UICheckButtonTemplate")
+    enCk:SetSize(18, 18); enCk:SetPoint("TOPLEFT", 2, -280); SkinCheck(enCk)
+    local enLbl = p:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    enLbl:SetPoint("LEFT", enCk, "RIGHT", 6, 0); enLbl:SetText(ns.L["Enabled"] or "Enabled")
+    enLbl:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+
+    local fb = p:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    fb:SetPoint("BOTTOMLEFT", 4, 4); fb:SetPoint("BOTTOMRIGHT", -4, 4)
+    fb:SetJustifyH("LEFT"); fb:SetWordWrap(true)
+
+    local saveBtn = Btn(f, ns.L["Save"], 100, 26); saveBtn:SetPoint("BOTTOMRIGHT", -110, 8)
+    local cancelBtn = Btn(f, ns.L["Cancel"], 90, 26); cancelBtn:SetPoint("BOTTOMRIGHT", -8, 8)
+    cancelBtn:SetScript("OnClick", function() f:Hide() end)
+
+    local function ApplyToEntry(e)
+        local tgt = tonumber(tgtEb:GetText()) or 1
+        e.target = math.max(1, math.floor(tgt))
+        local goldVal = tonumber(mpEb:GetText()) or 0
+        e.maxPrice = math.max(0, math.floor(goldVal)) * 10000  -- gold -> copper
+        local caGold = tonumber(caEb:GetText()) or 0
+        e.confirmAbove = math.max(0, math.floor(caGold)) * 10000
+        e.enabled = enCk:GetChecked() and true or false
+    end
+
+    saveBtn:SetScript("OnClick", function()
+        if editingEntry then
+            local id = ns.GetItemIDFromInput(eb:GetText())
+            if id and id ~= editingEntry.itemID then
+                if ns.FindVendorItemEntry(id) then
+                    fb:SetTextColor(1, 0.3, 0.3)
+                    fb:SetText(ns.L[" already in restock list."] or " already in restock list.")
+                    return
+                end
+                editingEntry.itemID = id
+                -- Si cambia el itemID, el historial de precios ya no aplica.
+                editingEntry.lastPaid = nil
+                editingEntry.lastPaidAt = nil
+            end
+            ApplyToEntry(editingEntry)
+            f:Hide()
+            if ns.RefreshVendorList then ns.RefreshVendorList() end
+            if ns.RefreshVendorRestockButton then ns:RefreshVendorRestockButton() end
+            return
+        end
+        local input = (eb:GetText() or ""):trim()
+        if input == "" then
+            fb:SetTextColor(1, 0.3, 0.3)
+            fb:SetText(ns.L["Enter an item ID, name, or link."])
+            return
+        end
+        local ok, addedOrMsg = ns:AddVendorRestockItem(input)
+        if ok then
+            ApplyToEntry(addedOrMsg)
+            f:Hide()
+            if ns.RefreshVendorList then ns.RefreshVendorList() end
+            if ns.RefreshVendorRestockButton then ns:RefreshVendorRestockButton() end
+        else
+            fb:SetTextColor(1, 0.3, 0.3); fb:SetText(addedOrMsg)
+        end
+    end)
+    eb:SetScript("OnEnterPressed", function() saveBtn:Click() end)
+    tgtEb:SetScript("OnEnterPressed", function() saveBtn:Click() end)
+    mpEb:SetScript("OnEnterPressed", function() saveBtn:Click() end)
+    caEb:SetScript("OnEnterPressed", function() saveBtn:Click() end)
+
+    local function Reset()
+        editingEntry = nil
+        eb:SetText(""); eb:Enable()
+        tgtEb:SetText("1")  -- default 1 al agregar
+        mpEb:SetText("0")
+        caEb:SetText("100")  -- default 100g threshold
+        enCk:SetChecked(true)
+        histLbl:SetText("")
+        fb:SetText("")
+        RefreshPreview()
+    end
+
+    local editor = {}
+    function editor:OpenAdd()
+        Reset()
+        f.title:SetText("|cff00ccff" .. (ns.L["Auction Item"] or "Auction Item") .. "|r")
+        saveBtn:SetText(ns.L["Add"])
+        f:Show(); eb:SetFocus()
+    end
+    function editor:OpenWithItemID(id)
+        Reset(); eb:SetText(tostring(id)); RefreshPreview()
+        f.title:SetText("|cff00ccff" .. (ns.L["Auction Item"] or "Auction Item") .. "|r")
+        saveBtn:SetText(ns.L["Add"])
+        f:Show()
+    end
+    function editor:OpenEdit(entry)
+        Reset(); editingEntry = entry
+        eb:SetText(tostring(entry.itemID or ""))
+        RefreshPreview()
+        tgtEb:SetText(tostring(tonumber(entry.target) or 1))
+        local mp = tonumber(entry.maxPrice) or 0
+        mpEb:SetText(tostring(math.floor(mp / 10000)))  -- copper -> gold
+        local ca = tonumber(entry.confirmAbove) or 0
+        caEb:SetText(tostring(math.floor(ca / 10000)))
+        enCk:SetChecked(entry.enabled ~= false)
+        -- Historial de precios: mostramos solo si hay lastPaid registrado.
+        if entry.lastPaid and entry.lastPaid > 0 and GetCoinTextureString then
+            local when = ""
+            if entry.lastPaidAt and time then
+                local secs = time() - entry.lastPaidAt
+                local days = math.floor(secs / 86400)
+                if days >= 1 then
+                    when = string.format(" (%dd)", days)
+                else
+                    local hours = math.floor(secs / 3600)
+                    when = string.format(" (%dh)", math.max(0, hours))
+                end
+            end
+            histLbl:SetText(string.format(
+                (ns.L["Last paid: %s%s"] or "Last paid: %s%s"),
+                GetCoinTextureString(entry.lastPaid), when))
+        else
+            histLbl:SetText("")
+        end
+        local n = ns.GetItemDisplayInfo(entry.itemID or 0)
+        f.title:SetText("|cff00ccff" .. ns.L["Editing: "] .. n .. "|r")
+        saveBtn:SetText(ns.L["Update"])
+        f:Show()
+    end
+    return editor
+end
+
 local cursorSpellEditor, cursorAuraEditor, ringAuraEditor, pulseSpellEditor, pulseAuraEditor
-local cursorItemEditor, pulseItemEditor
+local cursorItemEditor, pulseItemEditor, vendorItemEditor
 local function GetCursorSpellEditor() if not cursorSpellEditor then cursorSpellEditor=CreateCursorSpellEditor() end; return cursorSpellEditor end
 local function GetCursorAuraEditor() if not cursorAuraEditor then cursorAuraEditor=CreateCursorAuraEditor() end; return cursorAuraEditor end
 local function GetRingAuraEditor() if not ringAuraEditor then ringAuraEditor=CreateRingAuraEditor() end; return ringAuraEditor end
@@ -2530,6 +2756,10 @@ end
 local function GetPulseItemEditor()
     if not pulseItemEditor then pulseItemEditor=CreatePulseItemEditor() end
     return pulseItemEditor
+end
+local function GetVendorItemEditor()
+    if not vendorItemEditor then vendorItemEditor=CreateVendorItemEditor() end
+    return vendorItemEditor
 end
 
 -- ============================================================
@@ -3846,7 +4076,8 @@ end
 local function BuildReadyCheckTalentsTab(parent, C1, C2)
     local intro = parent:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     intro:SetPoint("TOPLEFT", C1, -4); intro:SetWidth(560); intro:SetJustifyH("LEFT")
-    intro:SetText(ns.L["Select the content type(s) where each loadout should be used. The panel warns at ready check if you're on the wrong one."])
+    intro:SetText(ns.L["Select the content type(s) where each talent build should be used. The panel warns at ready check if you're on the wrong one."]
+        or "Select the content type(s) where each talent build should be used. The panel warns at ready check if you're on the wrong one.")
 
     local specHdr = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     specHdr:SetPoint("TOPLEFT", C1, -36)
@@ -3880,7 +4111,7 @@ local function BuildReadyCheckTalentsTab(parent, C1, C2)
         if #configs == 0 then
             local empty = container:CreateFontString(nil, "OVERLAY", "GameFontDisable")
             empty:SetPoint("TOPLEFT", container, "TOPLEFT", 5, -8)
-            empty:SetText(ns.L["No saved loadouts for this spec"] or "No saved loadouts for this spec")
+            empty:SetText(ns.L["No saved talent builds for this spec"] or "No saved talent builds for this spec")
             container:SetHeight(30)
             return
         end
@@ -3933,7 +4164,7 @@ local function BuildReadyCheckPanelPage(p)
     local tabs, _ShowTab, SetTabEnabled = CreateModalTabs(tabHost, {
         ns.L["General"],
         ns.L["Items to check"],
-        ns.L["Talents"],
+        ns.L["Talent Builds"] or "Talent Builds",
     })
     local tGeneral, tItems, tTalents = tabs[1], tabs[2], tabs[3]
 
@@ -3979,7 +4210,7 @@ local function BuildReadyCheckPanelPage(p)
                 ns:RefreshReadyCheckPanel()
             end)
         cbItems:SetPoint("TOPLEFT", C1, catY); table.insert(allCheckboxes, cbItems)
-        local cbTalents = CreateCheckbox(tGeneral, ns.L["Talents"],
+        local cbTalents = CreateCheckbox(tGeneral, ns.L["Talent Builds"] or "Talent Builds",
             function() return (ns.db.readyCheckPanel.categoriesEnabled or {}).talents ~= false end,
             function(v)
                 ns.db.readyCheckPanel.categoriesEnabled = ns.db.readyCheckPanel.categoriesEnabled or {}
@@ -4003,7 +4234,7 @@ local function BuildReadyCheckPanelPage(p)
             { ns.L["Class buffs (party-aware)"], "checkClassBuffs" },
             { ns.L["Weapon Imbue"],         "checkClassImbue"   },
             { ns.L["Healthstone"],          "checkHealthstone"  },
-            { ns.L["Loadout"],              "checkTalentLoadout"},
+            { ns.L["Talent Build"] or "Talent Build", "checkTalentLoadout"},
             { ns.L["Check your mana"],     "checkResourceFull" },
         }
         local col1y, col2y = cy, cy
@@ -4025,6 +4256,197 @@ local function BuildReadyCheckPanelPage(p)
     do
         BuildReadyCheckTalentsTab(tTalents, C1, C2)
     end
+end
+
+-- ==================== Vendor Restock List ====================
+-- Container del scroll-list de items, asignado por BuildVendorRestockPage en
+-- build-time. RefreshVendorList lo limpia y rellena con un VendorItemRow por
+-- entry; expuesto via ns.RefreshVendorList para que el editor y el modulo
+-- VendorRestock disparen refrescos.
+local vendorListC
+
+local function VendorItemRow(parent, entry, idx, total, onDelete, onEdit, onMoveUp, onMoveDown)
+    local row = CreateFrame("Frame", nil, parent, "BackdropTemplate")
+    row:SetHeight(36)
+    row:SetPoint("LEFT", 3, 0); row:SetPoint("RIGHT", -3, 0)
+    SubPanelBackdrop(row, 0.6)
+
+    -- Toggle enabled: si esta off, no se compra aunque este en la lista.
+    local toggle = CreateFrame("CheckButton", nil, row, "UICheckButtonTemplate")
+    toggle:SetSize(20, 20); toggle:SetPoint("LEFT", 6, 0); SkinCheck(toggle)
+    toggle:SetChecked(entry.enabled ~= false)
+    toggle:SetScript("OnClick", function(self)
+        entry.enabled = self:GetChecked() and true or false
+        if ns.RefreshVendorRestockButton then ns:RefreshVendorRestockButton() end
+    end)
+
+    local name, icon = ns.GetItemDisplayInfo(entry.itemID or 0)
+    local iconTex = row:CreateTexture(nil, "ARTWORK")
+    iconTex:SetSize(28, 28); iconTex:SetPoint("LEFT", toggle, "RIGHT", 6, 0)
+    iconTex:SetTexture(icon)
+    iconTex:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+
+    -- Tooltip sobre el icono: hit-frame transparente porque textures no
+    -- reciben mouse events. Muestra el item link estandar via SetItemByID.
+    local iconHit = CreateFrame("Frame", nil, row); iconHit:SetAllPoints(iconTex); iconHit:EnableMouse(true)
+    iconHit:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:SetItemByID(entry.itemID or 0)
+        GameTooltip:Show()
+    end)
+    iconHit:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+    -- Texto: nombre + want/have. "have" se lee en runtime del bag count.
+    -- Pintamos amarillo si have < want (deficit), verde si have >= want.
+    -- Width fija porque la fila puede ser larga y los botones de la derecha
+    -- no estan anclados (orden de creacion). 320 cubre la mayoria de nombres
+    -- de items en la ventana default de 900px.
+    local fs = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    fs:SetPoint("LEFT", iconTex, "RIGHT", 8, 4)
+    fs:SetWidth(320); fs:SetJustifyH("LEFT"); fs:SetWordWrap(false)
+    local have = 0
+    if GetItemCount then have = GetItemCount(entry.itemID, false, false, false, false) or 0 end
+    local want = tonumber(entry.target) or 0
+    local statusColor = (have >= want) and "|cff66ff66" or "|cffffcc44"
+    fs:SetText(string.format("%s  %s%d/%d|r",
+        name, statusColor, have, want))
+
+    -- Linea 2 (debajo del nombre): max price + last paid.
+    local fs2 = row:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    fs2:SetPoint("LEFT", iconTex, "RIGHT", 8, -8)
+    fs2:SetWidth(320); fs2:SetJustifyH("LEFT"); fs2:SetWordWrap(false)
+    local parts = {}
+    local mp = tonumber(entry.maxPrice) or 0
+    if mp > 0 then
+        local mpStr = GetCoinTextureString and GetCoinTextureString(mp) or (math.floor(mp/10000) .. "g")
+        table.insert(parts, (ns.L["max"] or "max") .. " " .. mpStr)
+    end
+    if entry.lastPaid and entry.lastPaid > 0 then
+        local lpStr = GetCoinTextureString and GetCoinTextureString(entry.lastPaid) or tostring(entry.lastPaid)
+        -- Solo mostramos el valor — la flecha de up/down vs precio actual del
+        -- vendor vive en el tooltip del boton flotante (donde si conocemos el
+        -- precio current). Aca no tenemos vendor abierto.
+        table.insert(parts, (ns.L["last"] or "last") .. " " .. lpStr)
+    end
+    fs2:SetText(table.concat(parts, "  "))
+
+    -- Botones a la derecha: edit, delete, up, down.
+    local delBtn = CreateFrame("Button", nil, row); delBtn:SetSize(20, 20); delBtn:SetPoint("RIGHT", -8, 0)
+    local dt = delBtn:CreateFontString(nil, "OVERLAY", "GameFontRed"); dt:SetAllPoints(); dt:SetText("X")
+    local dh = delBtn:CreateTexture(nil, "HIGHLIGHT"); dh:SetAllPoints(); dh:SetColorTexture(0.8, 0.2, 0.2, 0.3)
+    delBtn:SetScript("OnClick", function() if onDelete then onDelete(entry) end end)
+
+    local editBtn = Btn(row, ns.L["Edit"], 56, 20); editBtn:SetPoint("RIGHT", delBtn, "LEFT", -6, 0)
+    editBtn:SetScript("OnClick", function() if onEdit then onEdit(entry) end end)
+
+    -- Up/Down arrows. Solo visibles si la entry puede moverse en esa direccion.
+    local upBtn = Btn(row, "^", 22, 20); upBtn:SetPoint("RIGHT", editBtn, "LEFT", -2, 0)
+    upBtn:SetScript("OnClick", function() if onMoveUp then onMoveUp() end end)
+    if idx <= 1 then upBtn:Disable() end
+    local downBtn = Btn(row, "v", 22, 20); downBtn:SetPoint("RIGHT", upBtn, "LEFT", -2, 0)
+    downBtn:SetScript("OnClick", function() if onMoveDown then onMoveDown() end end)
+    if idx >= total then downBtn:Disable() end
+
+    return row
+end
+
+local function RefreshVendorList()
+    if not vendorListC then return end
+    ClearListContainer(vendorListC)
+    local list = ns.db.vendorRestock.items or {}
+    if #list == 0 then
+        local e = vendorListC:CreateFontString(nil, "OVERLAY", "GameFontDisable")
+        e:SetPoint("TOPLEFT", 5, -8)
+        e:SetText(ns.L["No items. Use 'Add Item...' below or drag an item here."]
+            or "No items. Use 'Add Item...' below or drag an item here.")
+        vendorListC:SetHeight(30)
+        return
+    end
+    local n = #list
+    local rh = 40
+    for i, entry in ipairs(list) do
+        local row = VendorItemRow(vendorListC, entry, i, n,
+            function(e) ns:RemoveVendorRestockItem(e.itemID); RefreshVendorList()
+                if ns.RefreshVendorRestockButton then ns:RefreshVendorRestockButton() end end,
+            function(e) GetVendorItemEditor():OpenEdit(e) end,
+            function() SwapListEntries(list, i, i-1); RefreshVendorList() end,
+            function() SwapListEntries(list, i, i+1); RefreshVendorList() end)
+        row:SetPoint("TOPLEFT", 3, -3 - (i-1) * rh)
+        row:SetPoint("TOPRIGHT", -3, -3 - (i-1) * rh)
+    end
+    vendorListC:SetHeight(n * rh + 6)
+end
+ns.RefreshVendorList = RefreshVendorList
+
+-- Page: Auction Restock
+-- Lista user-curada de items para comprar en la casa de subastas. Drag+drop
+-- o "Add Item..." abre el modal CreateVendorItemEditor (storage key legacy).
+-- Posicion del boton flotante se setea solo arrastrandolo — no hay sliders
+-- en esta pagina. confirmAbove threshold es per-entry (en el editor).
+local function BuildVendorRestockPage(p)
+    local y = -8
+    local hd = H(p, ns.L["Auction Restock"] or "Auction Restock")
+    hd:SetPoint("TOPLEFT", 8, y); y = y - 18
+    local ht = p:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    ht:SetPoint("TOPLEFT", 8, y); ht:SetPoint("TOPRIGHT", -160, y)
+    ht:SetJustifyH("LEFT"); ht:SetWordWrap(true)
+    ht:SetText(ns.L["When you open the auction house, a button appears showing current prices for these items. Click to trigger a search; buy via the standard AH UI. Max price per item caps purchases; lastPaid tracks price changes."]
+        or "When you open the auction house, a button appears showing current prices. Click to search; buy via the standard AH UI.")
+
+    -- Test / Hide test al margen superior derecho.
+    local testBtn = Btn(p, ns.L["Test"] or "Test", 70, 22)
+    testBtn:SetPoint("TOPRIGHT", -16, -8)
+    testBtn:SetScript("OnClick", function()
+        if ns.TestVendorRestockButton then ns:TestVendorRestockButton() end
+    end)
+    local hideBtn = Btn(p, ns.L["Hide"] or "Hide", 70, 22)
+    hideBtn:SetPoint("RIGHT", testBtn, "LEFT", -4, 0)
+    hideBtn:SetScript("OnClick", function()
+        if ns.HideVendorRestockTest then ns:HideVendorRestockTest() end
+    end)
+
+    y = y - 32
+
+    -- ScrollList con todas las entries.
+    vendorListC = ScrollList(p, y, 280); y = y - 288
+
+    local addBtn = Btn(p, ns.L["Add Item..."], 130, 26); addBtn:SetPoint("TOPLEFT", 8, y)
+    addBtn:SetScript("OnClick", function() GetVendorItemEditor():OpenAdd() end)
+
+    local dzLabel = p:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    dzLabel:SetText(ns.L["or drag an item here:"] or "or drag an item here:")
+    dzLabel:SetPoint("LEFT", addBtn, "RIGHT", 10, 0)
+    local dz = DropZone(p, 260, 26, nil,
+        function(itemID) GetVendorItemEditor():OpenWithItemID(itemID) end)
+    dz:SetPoint("LEFT", dzLabel, "RIGHT", 6, 0)
+
+    -- Posicion del boton, visibilidad, escala y opacidad se setean directamente
+    -- arrastrando el boton (LeftButton drag) — no hay sliders en esta pagina.
+    -- El threshold confirmAbove se configura por entry en el editor del item;
+    -- aqui exponemos un threshold global como red de seguridad adicional.
+
+    y = y - 50
+
+    local gtLbl = p:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    gtLbl:SetPoint("TOPLEFT", 8, y)
+    gtLbl:SetText(ns.L["Global confirm threshold (gold, 0 = off):"] or "Global confirm threshold (gold, 0 = off):")
+    local gtEb = EditBox(p, 100); gtEb:SetPoint("LEFT", gtLbl, "RIGHT", 8, 0)
+    gtEb:SetNumeric(true)
+    gtEb:SetText(tostring(math.floor((ns.db.vendorRestock.confirmAbove or 0) / 10000)))
+    gtEb:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
+    gtEb:SetScript("OnEditFocusLost", function(self)
+        local g = tonumber(self:GetText()) or 0
+        ns.db.vendorRestock.confirmAbove = math.max(0, g) * 10000
+        self:SetText(tostring(math.floor(ns.db.vendorRestock.confirmAbove / 10000)))
+    end)
+
+    local gtHelp = p:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    gtHelp:SetPoint("TOPLEFT", 8, y - 22)
+    gtHelp:SetPoint("RIGHT", -16, 0); gtHelp:SetJustifyH("LEFT"); gtHelp:SetWordWrap(true)
+    gtHelp:SetText(ns.L["If the total cost exceeds this amount, a confirmation popup appears even when the per-item threshold doesn't trigger it."]
+        or "If the total cost exceeds this amount, a confirmation popup appears even when the per-item threshold doesn't trigger it.")
+
+    RefreshVendorList()
 end
 
 local function BuildGeneralPage(p)
@@ -4846,6 +5268,7 @@ function ns:CreateConfigWindow()
             {name=ns.L["Config"],     builder=BuildMrtConfigPage},
         }},
         {name=ns.L["Ready Check"],   enabledKey="readyCheckPanel", builder=BuildReadyCheckPanelPage},
+        {name=ns.L["Auction House"] or "Auction House", enabledKey="vendorRestock", builder=BuildVendorRestockPage},
         {name=ns.L["Macros"],        builder=BuildMacrosPage},
         {name=ns.L["Profiles"],      builder=BuildProfilesPage},
     }

@@ -489,8 +489,10 @@ ns.RegisterLocale("esES", {
     ["Select the content type(s) where each loadout should be used. The panel warns at ready check if you're on the wrong one."] =
         "Selecciona en qué tipo(s) de contenido se debe usar cada loadout. El panel avisa en el ready check si no estás en el correcto.",
     ["Wrong loadout"]                = "Loadout incorrecto",
+    ["Wrong talent build"]           = "Talento incorrecto",
     ["Switch"]                       = "Cambiar",
     ["Loadout"]                      = "Loadout",
+    ["Talent Build"]                 = "Talentos",
     ["Can't switch loadout in combat."] = "No se puede cambiar de loadout en combate.",
     ["Raid"]                         = "Banda",
     ["Mythic+"]                      = "Mítica+",
@@ -510,4 +512,84 @@ ns.RegisterLocale("esES", {
     ["Test panel"]                   = "Probar panel",
     ["Buff detection currently assumes English buff names. Localized clients may see false negatives."] =
         "La detección de buffs asume nombres en inglés. Los clientes localizados pueden ver falsos negativos.",
+
+    -- ===== Auction House (AuctionRestock module) =====
+    -- Sidebar label + header de la pagina.
+    ["Auction House"]                = "Subasta",
+    ["Auction Restock"]              = "Comprar en Subasta",
+    ["Auction Item"]                 = "Objeto de Subasta",
+
+    -- Labels del boton flotante (texto principal y subtexto).
+    ["Restock"]                      = "Comprar",
+    ["Configure restock"]            = "Configurar compras",
+    ["click to open config"]         = "click para abrir config",
+    ["All stocked"]                  = "Todo abastecido",
+    ["Nothing on AH"]                = "Nada en la subasta",
+    ["Searching..."]                 = "Buscando...",
+    ["Price too high"]               = "Precio muy alto",
+    ["item types"]                   = "tipos de objeto",
+    ["too pricey"]                   = "muy caro",
+    ["unavail"]                      = "no disp.",
+    ["pending"]                      = "pendiente",
+
+    -- Status labels en el tooltip (claves vienen de STATUS_LABEL_KEY).
+    -- "OK" se deja literal porque es universal.
+    ["price > max"]                  = "precio > máx",
+    ["not on AH"]                    = "no en subasta",
+    ["searching..."]                 = "buscando...",
+    ["queued"]                       = "en cola",
+
+    -- Tooltips y mensajes operacionales del boton.
+    ["No items configured yet. Click to open Config."] =
+        "Sin objetos configurados. Click para abrir Config.",
+    ["Shift+Drag to move."]          = "Shift+Arrastrar para mover.",
+    ["Drag to move."]                = "Arrastra para mover.",
+    ["All items at or above target. Nothing to restock."] =
+        "Todos los objetos alcanzaron el objetivo. Nada que comprar.",
+    ["Click to refresh search & jump to the first item. Buy via standard AH UI."] =
+        "Click para refrescar búsqueda y saltar al primer objeto. Compra desde la UI estándar de la subasta.",
+    ["Open Config > Auction House to add items."] =
+        "Abre Config > Subasta para añadir objetos.",
+    ["Open the auction house first."] = "Abre la casa de subastas primero.",
+    ["Another purchase already in progress."] = "Ya hay otra compra en curso.",
+    ["No items available to auto-buy right now."] =
+        "No hay objetos disponibles para auto-comprar ahora mismo.",
+    [" already in restock list."]    = " ya está en la lista de compras.",
+
+    -- Mensajes del flujo de compra (cotizacion / popup / resultado).
+    ["Quoting"]                      = "Cotizando",
+    ["Purchase complete"]            = "Compra completada",
+    ["Price changed"]                = "El precio cambió",
+    ["max"]                          = "máx",
+    ["Buy %d x %s for %s (%s/ea)?"]  = "¿Comprar %d x %s por %s (%s/ud)?",
+    -- Popup de confirmacion detallado (BuildBuyConfirmText).
+    ["In bag"]                       = "En mochila",
+    ["target"]                       = "objetivo",
+    ["Previous"]                     = "Anterior",
+    ["same"]                         = "igual",
+    ["No previous purchase recorded."] = "Sin compras anteriores registradas.",
+    ["Price spike — verify before buying."] =
+        "Subida de precio fuerte — verifica antes de comprar.",
+
+    -- Pagina de configuracion: descripcion + campos del editor.
+    ["When you open the auction house, a button appears showing current prices for these items. Click to trigger a search; buy via the standard AH UI. Max price per item caps purchases; lastPaid tracks price changes."] =
+        "Cuando abres la casa de subastas, aparece un botón mostrando los precios actuales de estos objetos. Click para buscar; compra desde la UI estándar de la subasta. El precio máximo por unidad limita las compras; lastPaid registra los cambios de precio.",
+    ["How many to buy:"]             = "Cuántos comprar:",
+    ["Target in bag"]                = "Objetivo en mochila",
+    ["Max price per item (gold, 0 = no limit):"] =
+        "Precio máximo por unidad (oro, 0 = sin límite):",
+    ["Confirm above (gold):"]        = "Confirmar si supera (oro):",
+    ["Confirm above (gold, 0 = no confirmation):"] =
+        "Confirmar si supera (oro, 0 = sin confirmación):",
+    ["Global confirm threshold (gold, 0 = off):"] =
+        "Umbral global de confirmación (oro, 0 = desactivado):",
+    ["If the total cost exceeds this amount, a confirmation popup appears even when the per-item threshold doesn't trigger it."] =
+        "Si el costo total supera este monto, aparece un popup de confirmación aunque el umbral per-item no lo dispare.",
+    ["Button settings"]              = "Ajustes del botón",
+    ["or drag an item here:"]        = "o arrastra un objeto aquí:",
+
+    -- Genericos compartidos con AuctionRestock que faltaban en otros idiomas.
+    ["Hide"]                         = "Ocultar",
+    ["Enabled"]                      = "Activado",
+    ["Scale"]                        = "Escala",
 })

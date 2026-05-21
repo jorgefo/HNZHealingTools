@@ -36,7 +36,7 @@ ns.DEFAULT_COLORS = DEFAULT_COLORS
 --   * eliminas un campo y necesitas convertir su valor a otra cosa
 -- ============================================================
 
-local CURRENT_SCHEMA_VERSION = 3
+local CURRENT_SCHEMA_VERSION = 5
 
 local function MigrateVisibilityField(cfg)
     if not cfg then return end
@@ -77,6 +77,41 @@ local MIGRATIONS = {
             mt.activeWindow = math.max(mt.lingerAfter, 3)
             mt.lingerAfter = nil
         end
+    end,
+    [4] = function(p)
+        -- vendorRestock: rediseño completo de la feature antes de release.
+        -- Reemplaza el modelo kind-based (targets por kind + extraItems +
+        -- kindsEnabled, derivando items de readyCheckPanel.actionItems) por
+        -- una lista explicita curada por el user con drag/search + target +
+        -- maxPrice + lastPaid history. Dropear los campos viejos previene
+        -- "ruido" de MergeDefaults conservandolos para siempre.
+        if not p.vendorRestock then return end
+        local vr = p.vendorRestock
+        vr.targets = nil
+        vr.kindsEnabled = nil
+        vr.extraItems = nil
+        if not vr.items then vr.items = {} end
+    end,
+    [5] = function(p)
+        -- Vendor Restock UX cleanup: confirmAbove pasa de global -> per-entry
+        -- (cada item tiene su propio threshold). Se eliminan tambien fields
+        -- de UI que ya no se exponen: visibility (siempre always), buttonScale
+        -- y opacity (hardcodeados). La posicion del boton se mantiene en
+        -- offsetX/Y — ahora se setea solo arrastrando el boton.
+        if not p.vendorRestock then return end
+        local vr = p.vendorRestock
+        local oldConfirm = vr.confirmAbove or 1000000  -- default historico 100g
+        if vr.items then
+            for _, e in ipairs(vr.items) do
+                if e.confirmAbove == nil then
+                    e.confirmAbove = oldConfirm
+                end
+            end
+        end
+        vr.confirmAbove = nil
+        vr.visibility = nil
+        vr.buttonScale = nil
+        vr.opacity = nil
     end,
 }
 
@@ -290,6 +325,43 @@ ns.PROFILE_DEFAULTS = {
         -- loadout y el activo es distinto, el panel ofrece switch.
         talentLoadouts = {},
     },
+    -- Vendor Restock: cuando el player abre un vendor (MERCHANT_SHOW), aparece
+    -- un boton flotante "Restock" que compra los items configurados hasta
+    -- alcanzar el target de bag count por entry. La lista es 100% user-curated
+    -- (drag desde bag/inventario o search por nombre/id/link). Cada entry
+    -- guarda lastPaid + lastPaidAt para que el tooltip muestre si el precio
+    -- subio o bajo respecto a la ultima compra.
+    -- Auto-hide al cerrar el vendor (MERCHANT_CLOSED).
+    vendorRestock = {
+        enabled = true,
+        -- Posicion movable del boton (anclado a UIParent CENTER + offsets).
+        -- Drag con LeftButton para moverlo; persistido aqui. No hay UI de
+        -- sliders — la posicion se setea solo arrastrando el boton.
+        offsetX = 0,
+        offsetY = -80,
+        -- Lista de items que el user quiere stockpilear. Cada entry:
+        --   itemID       — el item
+        --   target       — cantidad deseada en bag (default 1)
+        --   maxPrice     — precio max por unidad en copper (0 = sin tope)
+        --   confirmAbove — copper; si totalPrice del purchase supera N, se
+        --                  muestra popup de confirmacion. 0 = auto-confirm.
+        --                  Default 100g (1000000 copper).
+        --   enabled      — toggle por entry (default true)
+        --   lastPaid     — copper pagado por unidad la ultima vez
+        --   lastPaidAt   — time() del ultimo pago
+        items = {},
+        -- Umbral global de confirmacion (copper). Red de seguridad por encima
+        -- del threshold per-item: si totalPrice supera este monto, se muestra
+        -- popup aunque el entry.confirmAbove no lo dispare. 0 = desactivado.
+        -- Default 1000g — pensado para frenar compras anomalas grandes (item
+        -- caro inesperadamente, spike de precio) sin molestar en compras chicas.
+        confirmAbove = 10000000,
+        -- Cuando true, imprime al chat todos los eventos del sistema de throttle
+        -- del AH y los COMMODITY_* (search/price). Off por default — son muy
+        -- ruidosos. Toggle con:
+        --   /run HNZHealingToolsDB.profile.vendorRestock.debug = true
+        debug = false,
+    },
     -- Cursor ring: anillo decorativo siguiendo al raton (estilo CursorRing)
     cursorRing = {
         enabled = true,
@@ -454,6 +526,7 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
         ns:InitCursorRing()
         ns:InitMrtTimeline()
         ns:InitReadyCheckPanel()
+        ns:InitVendorRestock()
         ns:InitConfig()
         ns:InitMinimapButton()
         ns:InitPublicAPI()

@@ -6,6 +6,32 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ---
 
+## [1.8.0] — 2026-05-21
+
+### Added
+- **Auction Restock**: floating button that appears on `AUCTION_HOUSE_SHOW` and lists items from your curated restock list (`Config → Auction House`). For each item with a deficit (bag count below `target`), the addon issues a `C_AuctionHouse.SendSearchQuery` and caches the cheapest commodity offer + total available. Click the button to start a guided purchase: `RefreshCommoditySearchResults` + `StartCommoditiesPurchase` for the first buyable item; the server's `COMMODITY_PRICE_UPDATED` quote drives a confirmation popup; `Accept` calls `ConfirmCommoditiesPurchase`. `COMMODITY_PURCHASE_SUCCEEDED` writes `entry.lastPaid` / `lastPaidAt` so the next purchase can show price deltas. Drag the floating button with `LeftButton` to reposition it.
+- **Per-item editor fields**: `target` (text input, default 1), `maxPrice` (gold, 0 = no cap — purchase aborts if the quote exceeds), `confirmAbove` (gold, threshold above which the confirmation popup must be approved), `enabled`. Drag from your inventory into the page's drop zone to add an item, or use the search button.
+- **Detailed buy confirmation popup**: 5-line layout with icon + item name (highlight color), `quantity × unitPrice = totalPrice` with `GetCoinTextureString`, bag delta (`have → after  (target: N)`), price comparison vs `lastPaid` (`^ +X%` red / `v -X%` green / `=` gray) with time since last buy, and a bright `! Price spike — verify before buying.` warning if the unit price jumped ≥50%. The popup text is left-aligned via `OnShow` so multi-line content reads cleanly. State is snapshotted into `_autoBuy` at click time, so the popup is coherent even if the entry or inventory changes between click and the price quote.
+- **Global confirm threshold** (`vendorRestock.confirmAbove`): safety-net field that triggers the confirmation popup if `totalPrice` exceeds a global gold amount, even when the per-item `confirmAbove` doesn't gate. Default 1000g; the dual gate fires on `(perItem > 0 and total > perItem) or (global > 0 and total > global)`.
+- **Aura revalidation hook**: new `RevalidateAllAuras()` helper in `AuraMonitor.lua` wipes the speculative `auraCache`, `auraCacheByName`, and `cleuAuras` caches and re-runs `FullScanAll()` against `AuraUtil.ForEachAura`. Hooked to `PLAYER_REGEN_DISABLED`, `PLAYER_REGEN_ENABLED`, `READY_CHECK`, and `READY_CHECK_FINISHED`. Fixes the "ring stays visible after buff expired" bug caused by `SPELL_AURA_REMOVED` events being missed (out of range, log throttle) leaving the CLEU fallback stuck at `active=true` indefinitely when `duration=0`.
+- **Ready Check Panel is now movable**: `LeftButton` drag on the panel body (not on the click-to-use sub-row buttons) moves the panel and persists `offsetX/Y`. Re-anchored to `UIParent CENTER + offsets` after drag so the position survives `UIParent` resizes.
+- **`ns.RC_DEFAULT_USE_ITEMS`** exposed from `ReadyCheckPanel.lua` so other modules (Auction Restock, future features) can reuse the curated per-kind item lists without duplicating them.
+- **Schema migration v5** (`Core.lua`): per-item `confirmAbove` migration. The old global `vendorRestock.confirmAbove` value is copied to every existing item entry (preserving the user's previous threshold), then the global field is reset to the new default. Dropped fields no longer in the UI (`visibility`, `buttonScale`, `opacity`) are cleared from the saved DB.
+
+### Changed
+- **Ready Check Panel row label**: "Loadout" / "Wrong loadout" renamed to "Talent Build" / "Wrong talent build" for clarity.
+- **Auction Restock floating button drag**: no more `Shift` modifier — click and drag with `LeftButton` directly. Click-vs-drag is disambiguated by `RegisterForDrag("LeftButton")`, so the click action (open AH purchase flow) still works.
+- **Auction Restock config page simplified**: removed the visibility dropdown, offset/scale/opacity sliders, and global confirm-above editbox (replaced by per-item field). Position is now set exclusively by dragging the button. Scale (`1.0`) and opacity (`0.95`) are hardcoded.
+- **Auction Item editor**: `target` quantity changed from slider (1–200, default 20) to numeric editbox (default 1, no upper cap). Added `confirmAbove` per-item editbox.
+- **Sidebar label** changed from "Auction" to "Auction House" (`Subasta` in Spanish).
+
+### Fixed
+- **`AUCTION_HOUSE_THROTTLED_MESSAGE_DROPPED` false cancellation**: the event is system-wide and doesn't identify which queued AH message was dropped. Previously the handler called `ClearAutoBuy("message dropped (rate limit)")`, which aborted in-flight commodity purchases even when the dropped message was an unrelated search query — and the actual `COMMODITY_PRICE_UPDATED` for the purchase arrived afterwards but found `_autoBuy = nil` and silently dropped the popup. Now we only react to specific failure events (`COMMODITY_PURCHASE_FAILED`, `COMMODITY_PRICE_UNAVAILABLE`) and the 10s `awaitingPrice` timeout.
+- **AH search spam on Restock click**: the click handler used to call `RequestSearchForItem` for every configured item before starting the purchase. With multiple items and a fresh cache (e.g. just opened AH), this saturated the throttle queue and increased the chance of the purchase message being queued behind dropped searches. Now only `RefreshCommoditySearchResults(target.itemID)` runs before `StartCommoditiesPurchase`. The cache is filled once at `AUCTION_HOUSE_SHOW` and refreshed via the `THROTTLED_SYSTEM_READY` recovery hook.
+- **AH/COMMODITY debug print noise**: all AH throttle event prints (`SENT/RESPONSE/QUEUED/DROPPED`) and `COMMODITY_SEARCH_RESULTS_UPDATED` / `COMMODITY_PRICE_UPDATED` traces are now gated behind `vendorRestock.debug` (default `false`). The throttle events fire for **every** AH message system-wide, including Blizzard's own initial queries when the AH frame loads — leaving them ungated spammed the chat with dozens of lines on every visit. Toggle on via `/run HNZHealingToolsDB.profile.vendorRestock.debug = true` to diagnose.
+
+---
+
 ## [1.7.0] — 2026-05-18
 
 ### Added

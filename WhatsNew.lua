@@ -21,6 +21,22 @@ local addonName, ns = ...
 local function GetReleaseNotes()
     return {
         {
+            version = "1.8.0",
+            date = "2026-05-21",
+            items = {
+                ns.L["Auction Restock: floating button at the auction house that searches commodities for items in your curated list and starts a guided purchase via the standard AH flow. Per-item target quantity, max unit price, and a confirm-above threshold. lastPaid history persists per item, with up/down indicators in the tooltip and confirmation popup."],
+                ns.L["Detailed buy confirmation popup: icon + name, quantity × unit = total, bag delta (have → after, vs target), price change vs lastPaid (^ +X% or v -X%), time since last purchase, and a 'price spike' warning if the unit price jumped 50% or more."],
+                ns.L["Global confirm threshold: extra safety-net popup if the total cost exceeds a global gold amount, even when the per-item threshold doesn't trigger. Configurable in Config → Auction House."],
+                ns.L["Stuck-ring fix: the character ring auras now re-validate at known checkpoints (combat start, combat end, ready check). Speculative CLEU-based state is wiped and the authoritative AuraUtil scan re-populates the cache — fixes the random 'ring stays visible after the buff expired' bug."],
+                ns.L["Ready Check Panel can now be moved by clicking and dragging the panel (no Shift needed). Position persists across sessions."],
+                ns.L["Talent loadout row renamed 'Loadout' → 'Talent Build' for clarity."],
+                ns.L["Drag the Auction Restock floating button directly to reposition it (Shift no longer required). Position is auto-saved."],
+                ns.L["Fix: AUCTION_HOUSE_THROTTLED_MESSAGE_DROPPED no longer cancels in-flight commodity purchases. The event is system-wide and doesn't identify which message was dropped, so reacting to it was a false-positive that aborted purchases the server actually completed."],
+                ns.L["Fix: reduced AH search query spam on Restock click — only the target item is refreshed, not the whole list, cutting throttle contention."],
+                ns.L["AH/COMMODITY debug prints (SENT/RESPONSE/QUEUED/DROPPED, search/price updates) are gated behind a debug flag, default off. Toggle on with /run HNZHealingToolsDB.profile.vendorRestock.debug = true if you need to diagnose."],
+            },
+        },
+        {
             version = "1.7.0",
             date = "2026-05-18",
             items = {

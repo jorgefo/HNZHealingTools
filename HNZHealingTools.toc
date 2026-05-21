@@ -2,7 +2,7 @@
 ## Title: HNZ Healing Tools
 ## Notes: Combat HUD: cursor icons, character ring auras, central pulse, cursor ring & cast progress
 ## Author: fo
-## Version: 1.7.0
+## Version: 1.8.0
 ## SavedVariables: HNZHealingToolsDB
 ## SavedVariablesPerCharacter: HNZHealingToolsCharDB
 ## IconTexture: Interface\Icons\Spell_Nature_HealingTouch
@@ -28,6 +28,7 @@ CooldownPulse.lua
 CursorRing.lua
 MrtTimeline.lua
 ReadyCheckPanel.lua
+VendorRestock.lua
 Config.lua
 WhatsNew.lua
 Minimap.lua

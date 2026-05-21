@@ -807,6 +807,35 @@ local function FullScanAll()
     FullScanUnit("mouseover")
 end
 
+-- ============================================================
+-- Aura revalidation (anti-stuck-ring)
+-- ============================================================
+-- Forzar re-deteccion completa de auras tracked. Util en checkpoints donde
+-- el estado especulativo puede haberse desincronizado del juego: combat
+-- in/out (eventos pueden perderse por load/throttle) y ready check (momento
+-- canonico pre-pull donde el player espera ver el estado real).
+--
+-- Que limpiamos:
+--   - auraCache / auraCacheByName: cache event-driven (UNIT_AURA). Se
+--     repuebla via FullScanAll desde AuraUtil.ForEachAura (fuente autoritativa).
+--   - cleuAuras: fallback CLEU-based. Si un SPELL_AURA_REMOVED se perdio
+--     (out of range, log throttle, etc.) la entry quedaba stuck "active"
+--     hasta que su duration expirara — y si duration era 0 (indefinida),
+--     se quedaba para siempre. Esto explica el ring "pegado aleatoriamente".
+-- Que NO limpiamos:
+--   - cdmData: alimentado por hooks sobre el frame del Cooldown Manager de
+--     Blizzard y refrescado por ScanCdmViewers (0.5s). Es la unica fuente
+--     para auras fully-restricted (Mana Tea, etc.); wipearla causaria flicker.
+--   - knownAuraDurations: cache persistido (SavedVariables), no especulativo.
+--   - manualTriggerActiveSince: auto-expira via manualDuration en GetAuraStatus.
+local function RevalidateAllAuras()
+    wipe(auraCache)
+    wipe(auraCacheByName)
+    wipe(cleuAuras)
+    FullScanAll()
+    ns:MarkAuraDirty()
+end
+
 function ns:InitAuraMonitor()
     -- Hydrate (and rebind) the in-memory duration cache from SavedVariables so learned
     -- durations survive /reload and login. Rebinding the upvalue means LearnAuraDuration
@@ -825,6 +854,11 @@ function ns:InitAuraMonitor()
     pcall(monitorFrame.RegisterEvent, monitorFrame, "PLAYER_ENTERING_WORLD")
     pcall(monitorFrame.RegisterEvent, monitorFrame, "PLAYER_REGEN_DISABLED")
     pcall(monitorFrame.RegisterEvent, monitorFrame, "PLAYER_REGEN_ENABLED")
+    -- READY_CHECK + READY_CHECK_FINISHED: revalidamos para evitar rings stuck.
+    -- READY_CHECK es momento canonico pre-pull (el player chequea sus buffs)
+    -- y _FINISHED es el cierre — ambos justifican un wipe + rescan completo.
+    pcall(monitorFrame.RegisterEvent, monitorFrame, "READY_CHECK")
+    pcall(monitorFrame.RegisterEvent, monitorFrame, "READY_CHECK_FINISHED")
     pcall(monitorFrame.RegisterEvent, monitorFrame, "SPELL_ACTIVATION_OVERLAY_SHOW")
     pcall(monitorFrame.RegisterEvent, monitorFrame, "SPELL_ACTIVATION_OVERLAY_HIDE")
     pcall(monitorFrame.RegisterEvent, monitorFrame, "PLAYER_SPECIALIZATION_CHANGED")
@@ -899,9 +933,15 @@ function ns:InitAuraMonitor()
                 FireManualTriggerByID("spell", spellID)
             end
         elseif event == "PLAYER_REGEN_DISABLED" or event == "PLAYER_REGEN_ENABLED" then
-            -- One last scan when combat state changes
-            FullScanAll()
-            ns:MarkAuraDirty()
+            -- Revalidacion completa al entrar/salir de combate. Antes solo
+            -- llamabamos FullScanAll() pero eso no limpia cleuAuras, asi que
+            -- entries CLEU stuck "active" (REMOVED perdido, duration=0) se
+            -- quedaban tras combat — causa principal del ring pegado.
+            RevalidateAllAuras()
+        elseif event == "READY_CHECK" or event == "READY_CHECK_FINISHED" then
+            -- Misma logica: forzamos revalidacion para que el player vea el
+            -- estado autoritativo de sus buffs al hacerse el ready check.
+            RevalidateAllAuras()
         elseif event == "PLAYER_TARGET_CHANGED" then
             CacheClearUnit("target")
             FullScanUnit("target")
