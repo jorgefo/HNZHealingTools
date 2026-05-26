@@ -33,6 +33,7 @@ end
 local GetItemIcon = GetItemIcon or (C_Item and C_Item.GetItemIconByID)
 
 local restockButton
+local listFrame  -- HNZAuctionShoppingList: panel con rows por item + "Comprar todo"
 
 -- ============================================================
 -- Search cache
@@ -127,25 +128,34 @@ end
 
 -- Cada entry de salida:
 --   { entry, itemID, name, need, status, unitPrice, totalAvailable,
---     affordableQuantity, estimatedCost }
--- status: "buyable" | "tooExpensive" | "unavailable" | "searching" | "pending"
+--     affordableQuantity, estimatedCost, haveInBag, haveInMail }
+-- status: "buyable" | "tooExpensive" | "unavailable" | "searching" | "pending" | "inMail"
+--
+-- "inMail" indica que el item ya esta comprado (suma de mail >= deficit en bag).
+-- El row se incluye igual para que el panel pueda mostrar "ya comprado: X en
+-- correo" — sin esto, el item desapareceria de la lista y el user se
+-- preguntaria si lo configuro bien.
 local function ComputeShoppingList()
     local out = {}
     local s = ns.db and ns.db.vendorRestock
     if not s or not s.items then return out end
+    local mailCounts = (ns.charDB and ns.charDB.mailCounts) or {}
     for _, entry in ipairs(s.items) do
         if entry.enabled ~= false and entry.itemID then
             local target = tonumber(entry.target) or 0
             if target > 0 then
-                local have = GetItemCount(entry.itemID)
-                local need = target - have
+                local bag = GetItemCount(entry.itemID)
+                local mail = mailCounts[entry.itemID] or 0
+                local need = target - bag - mail
+                local row = {
+                    entry = entry,
+                    itemID = entry.itemID,
+                    haveInBag = bag,
+                    haveInMail = mail,
+                    need = math.max(0, need),
+                    name = (ns.GetItemDisplayInfo and ns.GetItemDisplayInfo(entry.itemID)) or ("item:" .. entry.itemID),
+                }
                 if need > 0 then
-                    local row = {
-                        entry = entry,
-                        itemID = entry.itemID,
-                        need = need,
-                        name = (ns.GetItemDisplayInfo and ns.GetItemDisplayInfo(entry.itemID)) or ("item:" .. entry.itemID),
-                    }
                     local cache = _searchCache[entry.itemID]
                     if cache then
                         row.unitPrice = cache.unitPrice
@@ -167,7 +177,14 @@ local function ComputeShoppingList()
                         row.status = _pendingSearches[entry.itemID] and "searching" or "pending"
                     end
                     table.insert(out, row)
+                elseif mail > 0 then
+                    -- Ya satisfecho gracias al correo. Mostrar fila informativa
+                    -- para que el user confirme que su compra esta en camino.
+                    row.status = "inMail"
+                    row.need = 0
+                    table.insert(out, row)
                 end
+                -- need <= 0 y mail == 0: completamente en bag, no aparece.
             end
         end
     end
@@ -191,6 +208,11 @@ local _lastPriceUpdate = {}  -- itemID -> { unitPrice, totalPrice, quantity, at 
 --   phase = "awaitingConfirm"→ popup mostrado, esperando click del user
 --   phase = "awaitingSuccess"→ ConfirmCommoditiesPurchase enviado
 local _autoBuy = nil
+-- Cola de items para "Comprar todo": tras cada SUCCEEDED/FAILED/UNAVAILABLE
+-- del autoBuy actual, BuyAllAdvance saca el siguiente itemID y dispara su
+-- compra. nil = no hay batch corriendo. El Cancel del popup limpia esto para
+-- abortar todo el batch (un cancel explicito = "freno").
+local _buyAllQueue = nil
 
 local function ClearAutoBuy(reason)
     if _autoBuy and reason then
@@ -280,6 +302,98 @@ local function BuildBuyConfirmText(itemID, unitPrice, totalPrice, quantity)
     return table.concat(lines, "\n")
 end
 
+-- Inicia la compra commodity para un item especifico (row de la shopping list).
+-- Factorizado del OnClick original del boton flotante para poder reusarlo desde
+-- los botones "Comprar" por fila del panel y desde BuyAllAdvance.
+local function StartPurchaseForItem(row)
+    if not row or not row.itemID then return false, "no row" end
+    if not IsAuctionHouseShown() then
+        print("|cffff5555HNZ|r " .. ((ns.L and ns.L["Open the auction house first."]) or "Open the auction house first."))
+        return false, "AH closed"
+    end
+    if not C_AuctionHouse or not C_AuctionHouse.StartCommoditiesPurchase then
+        print("|cffff5555HNZ|r Commodity buy API not available.")
+        return false, "API missing"
+    end
+    if _autoBuy then
+        print("|cffffcc44HNZ|r " .. ((ns.L and ns.L["Another purchase already in progress."]) or "Another purchase already in progress."))
+        return false, "in progress"
+    end
+    if row.status ~= "buyable" then return false, "not buyable" end
+
+    _autoBuy = {
+        itemID = row.itemID,
+        quantity = row.need,
+        name = row.name,
+        target = tonumber(row.entry.target) or 0,
+        maxPrice = tonumber(row.entry.maxPrice) or 0,
+        confirmAbove = tonumber(row.entry.confirmAbove) or 0,
+        lastPaid = tonumber(row.entry.lastPaid) or 0,
+        lastPaidAt = tonumber(row.entry.lastPaidAt) or 0,
+        haveAtStart = (GetItemCount and GetItemCount(row.itemID)) or 0,
+        startedAt = time and time() or 0,
+        phase = "awaitingPrice",
+    }
+    print(string.format("|cff00ccffHNZ|r %s: %s x%d (id=%d)",
+        (ns.L and ns.L["Quoting"]) or "Quoting",
+        row.name or "?", row.need, row.itemID))
+
+    if C_AuctionHouse.RefreshCommoditySearchResults then
+        pcall(C_AuctionHouse.RefreshCommoditySearchResults, row.itemID)
+    end
+
+    local ok, err = pcall(C_AuctionHouse.StartCommoditiesPurchase, row.itemID, row.need)
+    if not ok then
+        print("|cffff5555HNZ debug|r StartCommoditiesPurchase error: " .. tostring(err))
+        ClearAutoBuy("API error")
+        return false, "API error"
+    end
+    if ns.db and ns.db.vendorRestock and ns.db.vendorRestock.debug then
+        print("|cff888888HNZ debug|r StartCommoditiesPurchase invoked (waiting for PRICE_UPDATED...)")
+    end
+
+    local boughtItem = row.itemID
+    C_Timer.After(10, function()
+        if _autoBuy and _autoBuy.itemID == boughtItem and _autoBuy.phase == "awaitingPrice" then
+            ClearAutoBuy("timeout esperando price quote")
+        end
+    end)
+    if ns.RefreshVendorRestockButton then ns:RefreshVendorRestockButton() end
+    if ns.RefreshShoppingListPanel then ns:RefreshShoppingListPanel() end
+    return true
+end
+
+-- Saca el siguiente itemID del queue de "Comprar todo" y dispara su compra.
+-- Llamado tras cada SUCCEEDED/FAILED/UNAVAILABLE del autoBuy actual. Si el
+-- item ya no es "buyable" (precio cambio, stock se agoto, target ya alcanzado),
+-- skip y avanza al siguiente. Si el queue queda vacio o sin items validos,
+-- libera el queue.
+local function BuyAllAdvance()
+    if not _buyAllQueue then return end
+    if _autoBuy then return end  -- hay uno en vuelo, esperar
+    local list = ComputeShoppingList()
+    while _buyAllQueue and #_buyAllQueue > 0 do
+        local nextItemID = table.remove(_buyAllQueue, 1)
+        local row
+        for _, e in ipairs(list) do
+            if e.itemID == nextItemID and e.status == "buyable" then
+                row = e; break
+            end
+        end
+        if row then
+            local ok = StartPurchaseForItem(row)
+            if ok then return end
+            -- si no pudo iniciar (AH cerrada, etc), abortar batch
+            _buyAllQueue = nil
+            return
+        end
+        -- itemID skip: ya no buyable. Loop sigue al proximo.
+    end
+    _buyAllQueue = nil
+    if ns.RefreshShoppingListPanel then ns:RefreshShoppingListPanel() end
+end
+ns.BuyAllAdvance = BuyAllAdvance
+
 StaticPopupDialogs["HNZ_AH_BUY_CONFIRM"] = {
     text = "",
     button1 = ACCEPT or "Accept",
@@ -307,7 +421,12 @@ StaticPopupDialogs["HNZ_AH_BUY_CONFIRM"] = {
             end
         end)
     end,
-    OnCancel = function() ClearAutoBuy() end,
+    OnCancel = function()
+        ClearAutoBuy()
+        -- Cancel explicito = freno: aborta el batch entero de "Comprar todo".
+        _buyAllQueue = nil
+        if ns.RefreshShoppingListPanel then ns:RefreshShoppingListPanel() end
+    end,
     timeout = 30,
     whileDead = true,
     hideOnEscape = true,
@@ -426,7 +545,51 @@ local STATUS_LABEL_KEY = {
     unavailable  = "not on AH",
     searching    = "searching...",
     pending      = "queued",
+    -- inMail: el item ya fue comprado (sigue en el correo, no en mochila).
+    -- ComputeShoppingList lo emite cuando bag+mail >= target Y mail > 0.
+    inMail       = "Already bought (in mail)",
 }
+STATUS_COLOR.inMail = { 0.55, 0.80, 1.0 }
+
+-- ============================================================
+-- Mailbox scan
+-- ============================================================
+-- Cuando el user abre el buzon, escaneamos los attachments y agregamos por
+-- itemID. El resultado se cachea en ns.charDB (per-character, porque el correo
+-- es per-character — no tiene sentido compartirlo entre alts via el profile
+-- account-wide). ComputeShoppingList lo usa para descontar lo que ya esta en
+-- el correo del 'need', evitando que el user re-compre items pendientes.
+--
+-- Limitaciones: la cache solo se actualiza cuando el buzon esta abierto. Si
+-- el user recoge mail sin volver a abrirlo, la cache queda stale (pero el
+-- proximo MAIL_INBOX_UPDATE la corrige). Mostramos timestamp del scan en el
+-- panel para que el user sepa cuan fresca es.
+
+local ATTACHMENTS_PER_MAIL = ATTACHMENTS_MAX_RECEIVE or 16
+
+local function ScanMailbox()
+    if not _G.GetInboxNumItems or not _G.GetInboxItemLink then return end
+    local numMails = GetInboxNumItems() or 0
+    local counts = {}
+    for i = 1, numMails do
+        for attach = 1, ATTACHMENTS_PER_MAIL do
+            local link = GetInboxItemLink(i, attach)
+            if link then
+                local _, _, _, _, count = GetInboxItem(i, attach)
+                local itemID = tonumber(link:match("item:(%d+)"))
+                if itemID and count and count > 0 then
+                    counts[itemID] = (counts[itemID] or 0) + count
+                end
+            end
+        end
+    end
+    if ns.charDB then
+        ns.charDB.mailCounts = counts
+        ns.charDB.mailScannedAt = time and time() or 0
+    end
+    if ns.RefreshShoppingListPanel then ns:RefreshShoppingListPanel() end
+    if ns.RefreshVendorRestockButton then ns:RefreshVendorRestockButton() end
+end
 
 local function BuildTooltipText(list)
     local lines = {}
@@ -558,81 +721,14 @@ local function BuildButton()
             print("|cffff5555HNZ|r " .. ((ns.L and ns.L["Open the auction house first."]) or "Open the auction house first."))
             return
         end
-        if not C_AuctionHouse or not C_AuctionHouse.StartCommoditiesPurchase then
-            print("|cffff5555HNZ|r Commodity buy API not available.")
-            return
+        -- Toggle del panel de shopping list. Antes el click auto-elegia el
+        -- primer buyable y lanzaba la compra; ahora muestra el panel con
+        -- todos los items y deja al user elegir uno o "Comprar todo".
+        if listFrame and listFrame:IsShown() then
+            ns:HideShoppingListPanel()
+        else
+            ns:ShowShoppingListPanel()
         end
-        if _autoBuy then
-            print("|cffffcc44HNZ|r " .. ((ns.L and ns.L["Another purchase already in progress."]) or "Another purchase already in progress."))
-            return
-        end
-        -- Buscar el primer item "buyable" en la lista. NO re-buscamos toda la
-        -- lista aca: aumenta throttle pressure y puede causar que el siguiente
-        -- StartCommoditiesPurchase sea dropeado. La cache se llena en
-        -- AUCTION_HOUSE_SHOW y se mantiene fresca via search-results events;
-        -- si un item esta "pending" lo dejamos en pending hasta el proximo
-        -- ciclo de THROTTLED_SYSTEM_READY.
-        local list = self._list or {}
-        local target
-        for _, e in ipairs(list) do
-            if e.status == "buyable" then target = e; break end
-        end
-
-        if not target then
-            print("|cffffcc44HNZ|r " .. ((ns.L and ns.L["No items available to auto-buy right now."]) or "No items available to auto-buy right now."))
-            return
-        end
-
-        -- Start commodity purchase. Server respondera con COMMODITY_PRICE_UPDATED
-        -- — OnCommodityPriceUpdated va a mostrar el popup de confirmacion.
-        _autoBuy = {
-            itemID = target.itemID,
-            quantity = target.need,
-            -- Snapshot del entry + estado de inventario AL CLICK. El popup se
-            -- construye con esto (no con db.items vivos) para que sea coherente
-            -- aunque el user mute la entry o el inventario cambie entre el
-            -- click y la llegada de COMMODITY_PRICE_UPDATED.
-            name = target.name,
-            target = tonumber(target.entry.target) or 0,
-            maxPrice = tonumber(target.entry.maxPrice) or 0,
-            confirmAbove = tonumber(target.entry.confirmAbove) or 0,
-            lastPaid = tonumber(target.entry.lastPaid) or 0,
-            lastPaidAt = tonumber(target.entry.lastPaidAt) or 0,
-            haveAtStart = (GetItemCount and GetItemCount(target.itemID)) or 0,
-            startedAt = time and time() or 0,
-            phase = "awaitingPrice",
-        }
-        print(string.format("|cff00ccffHNZ|r %s: %s x%d (id=%d)",
-            (ns.L and ns.L["Quoting"]) or "Quoting",
-            target.name or "?", target.need, target.itemID))
-
-        -- Refrescar search results inmediatamente antes de start. La "purchase
-        -- prep" server-side usa los resultados commodity recientes para el
-        -- itemID; si la cache esta stale, el server dropea la peticion sin
-        -- responder con PRICE_UPDATED. Tanto Refresh como Start son protegidas
-        -- (requieren hardware event), pero estamos en el OnClick chain — OK.
-        if C_AuctionHouse.RefreshCommoditySearchResults then
-            pcall(C_AuctionHouse.RefreshCommoditySearchResults, target.itemID)
-        end
-
-        local ok, err = pcall(C_AuctionHouse.StartCommoditiesPurchase, target.itemID, target.need)
-        if not ok then
-            print("|cffff5555HNZ debug|r StartCommoditiesPurchase error: " .. tostring(err))
-            ClearAutoBuy("API error")
-            return
-        end
-        if ns.db and ns.db.vendorRestock and ns.db.vendorRestock.debug then
-            print("|cff888888HNZ debug|r StartCommoditiesPurchase invoked (waiting for PRICE_UPDATED...)")
-        end
-
-        -- Timeout: si no entra COMMODITY_PRICE_UPDATED dentro de 10s, abortar.
-        local boughtItem = target.itemID
-        C_Timer.After(10, function()
-            if _autoBuy and _autoBuy.itemID == boughtItem and _autoBuy.phase == "awaitingPrice" then
-                ClearAutoBuy("timeout esperando price quote")
-            end
-        end)
-        ns:RefreshVendorRestockButton()
     end)
 
     b:Hide()
@@ -656,6 +752,300 @@ end
 local function ShouldShowByVisibility()
     local s = ns.db and ns.db.vendorRestock
     return s and s.enabled and true or false
+end
+
+-- ============================================================
+-- Shopping list panel
+-- ============================================================
+-- Panel que muestra todos los items de la shopping list con un boton
+-- "Comprar" por fila + un boton "Comprar todo" abajo. Reemplaza al flujo
+-- antiguo donde el click del boton flotante auto-elegia el primer buyable
+-- y disparaba la compra. Ahora el flujo es:
+--   1) Click en boton flotante "Comprar (N)" -> toggle panel
+--   2) Usuario ve la lista completa + precios + status
+--   3) Click "Comprar" en una fila -> StartPurchaseForItem(row) -> el
+--      popup de threshold sigue funcionando como red de seguridad
+--   4) Click "Comprar todo" -> encola TODOS los buyable y BuyAllAdvance
+--      los procesa secuencialmente cuando cada SUCCEEDED/FAILED entra
+
+local PANEL_W = 380
+local PANEL_HEADER_H = 32
+local PANEL_FOOTER_H = 40
+local ROW_H = 32
+
+-- Pool de rows para reusar entre refreshes en vez de crear/destruir frames.
+-- WoW no GCea frames; crearlos y dejarlos huerfanos los mantiene vivos pero
+-- inutilizables.
+local function AcquireRow(panel, index)
+    panel._rowPool = panel._rowPool or {}
+    local r = panel._rowPool[index]
+    if r then return r end
+    r = CreateFrame("Frame", nil, panel.scrollContent, "BackdropTemplate")
+    r:SetSize(PANEL_W - 40, ROW_H - 2)
+    r:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8x8",
+        edgeFile = "Interface\\Buttons\\WHITE8x8",
+        edgeSize = 1,
+        insets = { left = 0, right = 0, top = 0, bottom = 0 },
+    })
+    r:SetBackdropColor(0.10, 0.10, 0.14, 0.85)
+    r:SetBackdropBorderColor(0.25, 0.25, 0.30, 1)
+
+    r.icon = r:CreateTexture(nil, "ARTWORK")
+    r.icon:SetSize(22, 22); r.icon:SetPoint("LEFT", 4, 0)
+
+    r.name = r:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    r.name:SetPoint("LEFT", r.icon, "RIGHT", 6, 5)
+    r.name:SetJustifyH("LEFT")
+    r.name:SetSize(170, 14)
+    r.name:SetWordWrap(false)
+
+    r.qtyPrice = r:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    r.qtyPrice:SetPoint("LEFT", r.icon, "RIGHT", 6, -7)
+    r.qtyPrice:SetJustifyH("LEFT")
+    r.qtyPrice:SetSize(170, 12)
+    r.qtyPrice:SetWordWrap(false)
+
+    r.buyBtn = CreateFrame("Button", nil, r, "UIPanelButtonTemplate")
+    r.buyBtn:SetSize(72, 22)
+    r.buyBtn:SetPoint("RIGHT", -6, 0)
+    r.buyBtn:SetText((ns.L and ns.L["Buy"]) or "Buy")
+
+    r.statusText = r:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    r.statusText:SetPoint("RIGHT", -8, 0)
+    r.statusText:SetJustifyH("RIGHT")
+
+    panel._rowPool[index] = r
+    return r
+end
+
+local function BuildShoppingListFrame()
+    if listFrame then return listFrame end
+    local f = CreateFrame("Frame", "HNZAuctionShoppingList", UIParent, "BackdropTemplate")
+    f:SetSize(PANEL_W, 200)  -- alto se calcula en refresh
+    f:SetFrameStrata("DIALOG")
+    f:SetClampedToScreen(true)
+    f:SetMovable(true); f:EnableMouse(true)
+    f:RegisterForDrag("LeftButton")
+    f:SetBackdrop({
+        bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
+        edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
+        tile = true, tileSize = 32, edgeSize = 16,
+        insets = { left = 4, right = 4, top = 4, bottom = 4 },
+    })
+    f:SetScript("OnDragStart", function(self) self:StartMoving() end)
+    f:SetScript("OnDragStop", function(self)
+        self:StopMovingOrSizing()
+        local cx, cy = self:GetCenter()
+        local pcx, pcy = UIParent:GetCenter()
+        if cx and pcx and ns.db and ns.db.vendorRestock then
+            ns.db.vendorRestock.panelOffsetX = math.floor((cx - pcx) + 0.5)
+            ns.db.vendorRestock.panelOffsetY = math.floor((cy - pcy) + 0.5)
+        end
+    end)
+
+    local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+    title:SetPoint("TOP", 0, -12)
+    title:SetText((ns.L and ns.L["Shopping list"]) or "Shopping list")
+    f.title = title
+
+    local close = CreateFrame("Button", nil, f, "UIPanelCloseButton")
+    close:SetPoint("TOPRIGHT", -2, -2)
+    close:SetScript("OnClick", function() ns:HideShoppingListPanel() end)
+
+    local scroll = CreateFrame("ScrollFrame", nil, f, "UIPanelScrollFrameTemplate")
+    scroll:SetPoint("TOPLEFT", 14, -PANEL_HEADER_H)
+    scroll:SetPoint("BOTTOMRIGHT", -32, PANEL_FOOTER_H)
+    local content = CreateFrame("Frame", nil, scroll)
+    content:SetSize(PANEL_W - 50, 1)
+    scroll:SetScrollChild(content)
+    f.scroll = scroll
+    f.scrollContent = content
+
+    f.totalText = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    f.totalText:SetPoint("BOTTOMLEFT", 14, 14)
+    f.totalText:SetJustifyH("LEFT")
+
+    f.buyAllBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+    f.buyAllBtn:SetSize(110, 24)
+    f.buyAllBtn:SetPoint("BOTTOMRIGHT", -14, 10)
+    f.buyAllBtn:SetText((ns.L and ns.L["Buy all"]) or "Buy all")
+    f.buyAllBtn:SetScript("OnClick", function()
+        if _autoBuy or _buyAllQueue then return end
+        local list = ComputeShoppingList()
+        local q = {}
+        for _, e in ipairs(list) do
+            if e.status == "buyable" then table.insert(q, e.itemID) end
+        end
+        if #q == 0 then
+            print("|cffffcc44HNZ|r " .. ((ns.L and ns.L["No items available to auto-buy right now."]) or "No items available to auto-buy right now."))
+            return
+        end
+        _buyAllQueue = q
+        BuyAllAdvance()
+        if ns.RefreshShoppingListPanel then ns:RefreshShoppingListPanel() end
+    end)
+
+    f:Hide()
+    listFrame = f
+    return f
+end
+
+local function ApplyPanelPosition(f)
+    local s = ns.db and ns.db.vendorRestock
+    f:ClearAllPoints()
+    if s and (s.panelOffsetX or s.panelOffsetY) then
+        f:SetPoint("CENTER", UIParent, "CENTER",
+            s.panelOffsetX or 0, s.panelOffsetY or 0)
+    else
+        f:SetPoint("CENTER", UIParent, "CENTER", 0, 40)
+    end
+end
+
+function ns:RefreshShoppingListPanel()
+    if not listFrame or not listFrame:IsShown() then return end
+    local list = ComputeShoppingList()
+    local content = listFrame.scrollContent
+
+    -- Layout vertical de rows
+    local y = 0
+    local totalEstimated = 0
+    local buyableCount = 0
+    local busy = (_autoBuy ~= nil) or (_buyAllQueue ~= nil)
+
+    for i, e in ipairs(list) do
+        local r = AcquireRow(listFrame, i)
+        r:ClearAllPoints()
+        r:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -y)
+        r:SetPoint("TOPRIGHT", content, "TOPRIGHT", 0, -y)
+        r:Show()
+
+        local icon = GetItemIcon and GetItemIcon(e.itemID)
+        if icon then r.icon:SetTexture(icon) else r.icon:SetTexture(nil) end
+
+        r.name:SetText(e.name or ("item:" .. tostring(e.itemID)))
+
+        -- Linea 2: cantidad + precio (con flecha vs lastPaid si aplica) + mail
+        local sub
+        local mailSuffix = ""
+        if (e.haveInMail or 0) > 0 then
+            mailSuffix = string.format("  |cff88bbff(%d %s)|r",
+                e.haveInMail, (ns.L and ns.L["in mail"]) or "in mail")
+        end
+        if e.status == "buyable" or e.status == "tooExpensive" then
+            local priceStr = GetCoinTextureString and GetCoinTextureString(e.unitPrice or 0) or tostring(e.unitPrice or 0)
+            local arrow = ""
+            if e.entry.lastPaid and e.entry.lastPaid > 0 and e.unitPrice then
+                if e.unitPrice < e.entry.lastPaid then arrow = " |cff66ff66v|r"
+                elseif e.unitPrice > e.entry.lastPaid then arrow = " |cffff6666^|r"
+                else arrow = " |cff888888=|r" end
+            end
+            sub = string.format("x%d  %s%s%s", e.need, priceStr, arrow, mailSuffix)
+        elseif e.status == "inMail" then
+            -- Ya comprado: mostrar cuanto hay en bag/mail/target.
+            sub = string.format("%s: %d  |  %s: %d  |  %s: %d",
+                (ns.L and ns.L["bag"]) or "bag", e.haveInBag or 0,
+                (ns.L and ns.L["mail"]) or "mail", e.haveInMail or 0,
+                (ns.L and ns.L["target"]) or "target", tonumber(e.entry.target) or 0)
+        else
+            sub = string.format("x%d%s", e.need, mailSuffix)
+        end
+        r.qtyPrice:SetText(sub)
+
+        -- Boton "Comprar" o texto de status
+        if e.status == "buyable" then
+            r.buyBtn:Show()
+            r.statusText:Hide()
+            local row = e  -- closure
+            r.buyBtn:SetScript("OnClick", function()
+                -- Single-buy desde el panel cancela cualquier batch previo:
+                -- el user esta tomando control manual.
+                _buyAllQueue = nil
+                StartPurchaseForItem(row)
+            end)
+            if busy then
+                r.buyBtn:Disable()
+            else
+                r.buyBtn:Enable()
+            end
+            if e.estimatedCost then totalEstimated = totalEstimated + e.estimatedCost end
+            buyableCount = buyableCount + 1
+            r:SetBackdropBorderColor(0.30, 0.55, 0.35, 1)
+        else
+            r.buyBtn:Hide()
+            r.statusText:Show()
+            local statusKey = STATUS_LABEL_KEY[e.status] or e.status
+            local statusStr = (ns.L and ns.L[statusKey]) or statusKey
+            r.statusText:SetText(statusStr)
+            local c = STATUS_COLOR[e.status] or { 1, 1, 1 }
+            r.statusText:SetTextColor(c[1], c[2], c[3])
+            r:SetBackdropBorderColor(0.25, 0.25, 0.30, 1)
+        end
+
+        y = y + ROW_H
+    end
+
+    -- Ocultar rows del pool que ya no se usan
+    if listFrame._rowPool then
+        for j = #list + 1, #listFrame._rowPool do
+            listFrame._rowPool[j]:Hide()
+        end
+    end
+
+    content:SetHeight(math.max(1, y))
+
+    -- Total + estado del boton "Comprar todo"
+    if #list == 0 then
+        listFrame.totalText:SetText((ns.L and ns.L["All stocked"]) or "All stocked")
+        listFrame.buyAllBtn:Disable()
+        listFrame.buyAllBtn:SetText((ns.L and ns.L["Buy all"]) or "Buy all")
+    else
+        local totalStr = GetCoinTextureString and GetCoinTextureString(totalEstimated) or tostring(totalEstimated)
+        -- Linea de total + scan del mail (cuando fue el ultimo escaneo del buzon)
+        local totalLine = string.format("%s %s",
+            (ns.L and ns.L["Total:"]) or "Total:", totalStr)
+        local scannedAt = ns.charDB and ns.charDB.mailScannedAt or 0
+        if scannedAt > 0 then
+            local age = FormatRelativeTime(scannedAt) or "?"
+            totalLine = totalLine .. string.format("   |cff888888(%s %s)|r",
+                (ns.L and ns.L["mail scan:"]) or "mail scan:", age)
+        else
+            totalLine = totalLine .. string.format("   |cff888888(%s)|r",
+                (ns.L and ns.L["mail not scanned — open the mailbox"]) or "mail not scanned - open the mailbox")
+        end
+        listFrame.totalText:SetText(totalLine)
+        if busy then
+            listFrame.buyAllBtn:Disable()
+            listFrame.buyAllBtn:SetText(
+                _buyAllQueue and string.format("%s (%d)",
+                    (ns.L and ns.L["Buying..."]) or "Buying...",
+                    #_buyAllQueue + (_autoBuy and 1 or 0))
+                or ((ns.L and ns.L["Buying..."]) or "Buying..."))
+        elseif buyableCount == 0 then
+            listFrame.buyAllBtn:Disable()
+            listFrame.buyAllBtn:SetText((ns.L and ns.L["Buy all"]) or "Buy all")
+        else
+            listFrame.buyAllBtn:Enable()
+            listFrame.buyAllBtn:SetText(string.format("%s (%d)",
+                (ns.L and ns.L["Buy all"]) or "Buy all", buyableCount))
+        end
+    end
+
+    -- Alto del frame: header + rows visibles (capado) + footer
+    local visibleRows = math.min(#list, 8)
+    local rowsH = math.max(ROW_H, visibleRows * ROW_H)
+    listFrame:SetHeight(PANEL_HEADER_H + rowsH + PANEL_FOOTER_H + 6)
+end
+
+function ns:ShowShoppingListPanel()
+    BuildShoppingListFrame()
+    ApplyPanelPosition(listFrame)
+    listFrame:Show()
+    ns:RefreshShoppingListPanel()
+end
+
+function ns:HideShoppingListPanel()
+    if listFrame and listFrame:IsShown() then listFrame:Hide() end
 end
 
 -- ============================================================
@@ -707,12 +1097,20 @@ function ns:RefreshVendorRestockButton()
         return
     end
 
-    local buyable, expensive, unavail, searching = 0, 0, 0, 0
+    local buyable, expensive, unavail, searching, inMail = 0, 0, 0, 0, 0
     for _, e in ipairs(list) do
         if e.status == "buyable" then buyable = buyable + 1
         elseif e.status == "tooExpensive" then expensive = expensive + 1
         elseif e.status == "unavailable" then unavail = unavail + 1
+        elseif e.status == "inMail" then inMail = inMail + 1
         else searching = searching + 1 end
+    end
+
+    local function inMailSuffix()
+        if inMail > 0 then
+            return string.format(" · %d %s", inMail, (ns.L and ns.L["in mail"]) or "in mail")
+        end
+        return ""
     end
 
     if buyable > 0 then
@@ -724,22 +1122,29 @@ function ns:RefreshVendorRestockButton()
         if expensive > 0 then table.insert(parts, string.format("%d %s", expensive, (ns.L and ns.L["too pricey"]) or "too pricey")) end
         if unavail > 0 then table.insert(parts, string.format("%d %s", unavail, (ns.L and ns.L["unavail"]) or "unavail")) end
         if searching > 0 then table.insert(parts, string.format("%d %s", searching, (ns.L and ns.L["pending"]) or "pending")) end
+        if inMail > 0 then table.insert(parts, string.format("%d %s", inMail, (ns.L and ns.L["in mail"]) or "in mail")) end
         restockButton.Sub:SetText(table.concat(parts, " · "))
     elseif expensive > 0 and (searching + unavail) == 0 then
         restockButton:SetBackdropColor(0.30, 0.22, 0.10, 0.88)
         restockButton:SetBackdropBorderColor(0.85, 0.55, 0.25, 1)
         restockButton.Label:SetText((ns.L and ns.L["Price too high"]) or "Price too high")
-        restockButton.Sub:SetText(string.format("%d %s", expensive, (ns.L and ns.L["item types"]) or "item types"))
+        restockButton.Sub:SetText(string.format("%d %s%s", expensive, (ns.L and ns.L["item types"]) or "item types", inMailSuffix()))
     elseif searching > 0 then
         restockButton:SetBackdropColor(0.15, 0.18, 0.30, 0.88)
         restockButton:SetBackdropBorderColor(0.40, 0.55, 0.90, 1)
         restockButton.Label:SetText((ns.L and ns.L["Searching..."]) or "Searching...")
-        restockButton.Sub:SetText(string.format("%d %s", searching, (ns.L and ns.L["pending"]) or "pending"))
+        restockButton.Sub:SetText(string.format("%d %s%s", searching, (ns.L and ns.L["pending"]) or "pending", inMailSuffix()))
+    elseif inMail > 0 and (unavail + expensive + searching) == 0 then
+        -- Solo quedan rows "ya comprado, en correo". Mostrar mensaje positivo.
+        restockButton:SetBackdropColor(0.12, 0.22, 0.40, 0.88)
+        restockButton:SetBackdropBorderColor(0.45, 0.65, 0.95, 1)
+        restockButton.Label:SetText((ns.L and ns.L["Check your mail"]) or "Check your mail")
+        restockButton.Sub:SetText(string.format("%d %s", inMail, (ns.L and ns.L["in mail"]) or "in mail"))
     else
         restockButton:SetBackdropColor(0.20, 0.20, 0.20, 0.85)
         restockButton:SetBackdropBorderColor(0.55, 0.55, 0.55, 1)
         restockButton.Label:SetText((ns.L and ns.L["Nothing on AH"]) or "Nothing on AH")
-        restockButton.Sub:SetText(string.format("%d %s", unavail, (ns.L and ns.L["item types"]) or "item types"))
+        restockButton.Sub:SetText(string.format("%d %s%s", unavail, (ns.L and ns.L["item types"]) or "item types", inMailSuffix()))
     end
     ApplyButtonPosition(restockButton)
     restockButton:Show()
@@ -843,6 +1248,10 @@ function ns:InitVendorRestock()
     ev:RegisterEvent("BAG_UPDATE_DELAYED")
     ev:RegisterEvent("PLAYER_REGEN_DISABLED")
     ev:RegisterEvent("PLAYER_REGEN_ENABLED")
+    -- MAIL_INBOX_UPDATE dispara cuando el buzon se abre Y cuando el listado se
+    -- actualiza (ej. el user toma un item). Usar este event en vez de MAIL_SHOW
+    -- garantiza que captamos cambios mid-session sin necesidad de re-abrir.
+    ev:RegisterEvent("MAIL_INBOX_UPDATE")
     ev:SetScript("OnEvent", function(_, event, arg1, arg2, arg3)
         if event == "AUCTION_HOUSE_SHOW" then
             -- NO limpiamos cache: si tenemos resultados previos validos (de
@@ -864,6 +1273,9 @@ function ns:InitVendorRestock()
             ns:RefreshVendorRestockButton()
         elseif event == "AUCTION_HOUSE_CLOSED" then
             if restockButton then restockButton:Hide() end
+            ns:HideShoppingListPanel()
+            -- AH cerrada mid-batch: cancelar el resto del queue.
+            _buyAllQueue = nil
         elseif event == "COMMODITY_SEARCH_RESULTS_UPDATED" then
             local itemID = arg1
             if ns.db and ns.db.vendorRestock and ns.db.vendorRestock.debug then
@@ -873,6 +1285,7 @@ function ns:InitVendorRestock()
             if itemID then
                 ReadSearchResults(itemID)
                 ns:RefreshVendorRestockButton()
+                if ns.RefreshShoppingListPanel then ns:RefreshShoppingListPanel() end
             end
         elseif event == "COMMODITY_PRICE_UPDATED" then
             -- Retail signature: (unitPrice, totalPrice). No itemID en payload.
@@ -891,12 +1304,20 @@ function ns:InitVendorRestock()
                     (ns.GetItemDisplayInfo and ns.GetItemDisplayInfo(itemID)) or ("item:"..tostring(itemID))))
             end
             ClearAutoBuy()
+            if ns.RefreshShoppingListPanel then ns:RefreshShoppingListPanel() end
+            -- Avanzar el queue de "Comprar todo" si hay batch en curso.
+            -- Pequeño delay para evitar throttle pressure entre compras.
+            if _buyAllQueue then C_Timer.After(0.5, BuyAllAdvance) end
         elseif event == "COMMODITY_PURCHASE_FAILED" then
             print("|cffff5555HNZ debug|r COMMODITY_PURCHASE_FAILED")
             ClearAutoBuy("server purchase failed")
+            if ns.RefreshShoppingListPanel then ns:RefreshShoppingListPanel() end
+            if _buyAllQueue then C_Timer.After(0.5, BuyAllAdvance) end
         elseif event == "COMMODITY_PRICE_UNAVAILABLE" then
             print("|cffff5555HNZ debug|r COMMODITY_PRICE_UNAVAILABLE")
             ClearAutoBuy("server price unavailable")
+            if ns.RefreshShoppingListPanel then ns:RefreshShoppingListPanel() end
+            if _buyAllQueue then C_Timer.After(0.5, BuyAllAdvance) end
         elseif event == "AUCTION_HOUSE_THROTTLED_MESSAGE_DROPPED" then
             -- NO cancelamos autoBuy aqui: el evento es global del sistema de
             -- throttle del AH y NO indica que mensaje fue dropeado. Si el
@@ -939,6 +1360,9 @@ function ns:InitVendorRestock()
             end
         elseif event == "BAG_UPDATE_DELAYED" then
             ns:RefreshVendorRestockButton()
+            if ns.RefreshShoppingListPanel then ns:RefreshShoppingListPanel() end
+        elseif event == "MAIL_INBOX_UPDATE" then
+            ScanMailbox()
         elseif event == "PLAYER_REGEN_DISABLED" or event == "PLAYER_REGEN_ENABLED" then
             ns:RefreshVendorRestockButton()
         end

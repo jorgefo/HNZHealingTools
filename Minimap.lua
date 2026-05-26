@@ -38,7 +38,8 @@ local function ShowTooltip(self)
     GameTooltip:SetOwner(self, "ANCHOR_LEFT")
     GameTooltip:AddLine("|cff34d0afHNZ Healing Tools|r")
     GameTooltip:AddLine("|cffffffff" .. L["Left click:"] .. "|r " .. L["open/close config"], 1, 1, 1)
-    GameTooltip:AddLine("|cffffffff" .. L["Right click:"] .. "|r " .. L["toggle cursor + ring icons"], 1, 1, 1)
+    GameTooltip:AddLine("|cffffffff" .. L["Right click:"] .. "|r " .. L["open ready check panel"], 1, 1, 1)
+    GameTooltip:AddLine("|cffffffff" .. L["Shift+Right click:"] .. "|r " .. L["toggle cursor + ring icons"], 1, 1, 1)
     GameTooltip:AddLine("|cffffffff" .. L["Drag:"] .. "|r " .. L["move icon"], 1, 1, 1)
     GameTooltip:Show()
 end
@@ -77,8 +78,16 @@ function ns:InitMinimapButton()
         if btn == "LeftButton" then
             if ns.ToggleConfigWindow then ns:ToggleConfigWindow() end
         elseif btn == "RightButton" then
-            if ns.ToggleCursorDisplay then ns:ToggleCursorDisplay() end
-            if ns.ToggleRingDisplay  then ns:ToggleRingDisplay()  end
+            -- Shift+RightClick preserva el toggle viejo (cursor + ring) para
+            -- usuarios que ya lo tenian mapeado mental. RightClick plano pasa
+            -- a abrir el panel de Ready Check, que es lo que el user pidio
+            -- como behavior primario.
+            if IsShiftKeyDown and IsShiftKeyDown() then
+                if ns.ToggleCursorDisplay then ns:ToggleCursorDisplay() end
+                if ns.ToggleRingDisplay  then ns:ToggleRingDisplay()  end
+            else
+                if ns.ToggleReadyCheckPanel then ns:ToggleReadyCheckPanel() end
+            end
         end
     end)
 

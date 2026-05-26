@@ -487,6 +487,103 @@ local function GetSpellNameSafe(spellID)
     return "Spell " .. tostring(spellID)
 end
 
+-- Audio announce: cadena de fallback para anunciar un spell.
+--
+-- 1) Pre-recorded WAV en Sounds/Spells/<locale>/<spellID>.wav (path principal).
+--    Generado offline con tools/generate_spell_audio.ps1 usando SAPI. Ventaja:
+--    funciona en TODOS los clientes via PlaySoundFile, no depende de Vivox que
+--    en muchos sistemas no se inicializa (IsLoggedIn=false silencia TTS).
+--
+-- 2) Fallback a C_VoiceChat.SpeakText (TTS del SO) para spells sin archivo.
+--    Solo funciona si el subsistema de voice chat de WoW esta logged in — sino
+--    queda silencioso.
+--
+-- voiceID en (2): NO es un slot (0/1/2). C_VoiceChat.GetTtsVoices() devuelve
+-- una lista de { voiceID, name, language } donde voiceID es un numero opaco
+-- asignado por Blizzard a cada voz instalada del SO.
+local _ttsVoicesAvailable  -- lista cruda de GetTtsVoices, para debug/picker
+local AUDIO_PATH_PREFIX = "Interface\\AddOns\\HNZHealingTools\\Sounds\\Spells\\"
+
+-- Devuelve la carpeta de idioma para audios pre-grabados. Si cfg.ttsLanguage
+-- es "esES" o "enUS" se respeta como override explicito; "auto" o nil cae a
+-- detection via GetLocale (esES/esMX → esES, resto → enUS).
+local function GetAudioLocale(cfg)
+    local override = cfg and cfg.ttsLanguage
+    if override == "esES" or override == "enUS" then return override end
+    local loc = GetLocale and GetLocale() or "enUS"
+    if loc == "esES" or loc == "esMX" then return "esES" end
+    return "enUS"
+end
+
+local function GetAvailableTtsVoices()
+    if _ttsVoicesAvailable then return _ttsVoicesAvailable end
+    if not (C_VoiceChat and C_VoiceChat.GetTtsVoices) then
+        _ttsVoicesAvailable = {}
+        return _ttsVoicesAvailable
+    end
+    local ok, list = pcall(C_VoiceChat.GetTtsVoices)
+    _ttsVoicesAvailable = (ok and type(list) == "table") and list or {}
+    return _ttsVoicesAvailable
+end
+ns.MrtGetTtsVoices = GetAvailableTtsVoices
+
+local function ResolveTtsVoiceID(cfg)
+    local voices = GetAvailableTtsVoices()
+    if #voices == 0 then return nil end
+    -- Si el usuario configuro un voiceID explicito que exista en la lista,
+    -- usarlo (incluye voiceID=0 si esta presente — Sabina en algunos sistemas).
+    local desired = cfg and cfg.ttsVoiceID
+    if desired ~= nil then
+        for _, v in ipairs(voices) do
+            if v.voiceID == desired then return desired end
+        end
+    end
+    -- Fallback: primera voz disponible.
+    return voices[1].voiceID
+end
+
+-- Path 1: archivo pre-grabado. PlaySoundFile devuelve (willPlay, soundHandle).
+-- willPlay=false si el archivo no existe o no se pudo abrir — en ese caso
+-- caemos al path 2 (TTS).
+local function TryPlayPrerecorded(spellID, cfg)
+    if not (PlaySoundFile and spellID) then return false end
+    local path = AUDIO_PATH_PREFIX .. GetAudioLocale(cfg) .. "\\" .. tostring(spellID) .. ".wav"
+    local willPlay = PlaySoundFile(path, "Master")
+    return willPlay and true or false
+end
+
+-- Path 2: TTS fallback via C_VoiceChat.SpeakText.
+local function TryTTS(spellID, cfg)
+    if not (C_VoiceChat and C_VoiceChat.SpeakText) then return false end
+    local name = GetSpellNameSafe(spellID)
+    if not name or name == "" then return false end
+    local voiceID = ResolveTtsVoiceID(cfg)
+    if not voiceID then return false end
+
+    if C_TTSSettings then
+        if C_TTSSettings.SetSpeechVolume then
+            pcall(C_TTSSettings.SetSpeechVolume, cfg.ttsVolume or 100)
+        end
+        if C_TTSSettings.SetSpeechRate then
+            pcall(C_TTSSettings.SetSpeechRate, cfg.ttsRate or 0)
+        end
+    end
+    local destination = (Enum and Enum.VoiceTtsDestination and Enum.VoiceTtsDestination.ScreenReader) or 4
+    local ok = pcall(C_VoiceChat.SpeakText, voiceID, name, destination,
+        cfg.ttsRate or 0, cfg.ttsVolume or 100)
+    return ok
+end
+
+-- Punto de entrada: intenta pre-recorded primero, fallback a TTS si no hay
+-- archivo. La idea es que la cadena sea robusta — en clientes con Vivox roto
+-- (mayoria de los usuarios actuales) el TTS no produce audio, pero las
+-- recordings WAV via PlaySoundFile funcionan siempre.
+local function SpeakSpell(spellID, cfg)
+    if TryPlayPrerecorded(spellID, cfg) then return end
+    TryTTS(spellID, cfg)
+end
+ns.MrtSpeakSpell = SpeakSpell
+
 -- Render principal: itera entries, computa state actual vs anterior, despacha
 -- transiciones a las integraciones (ring/pulse) y dibuja iconos cerca del cursor.
 local function UpdateIcons(now, cfg)
@@ -502,6 +599,19 @@ local function UpdateIcons(now, cfg)
     for _, e in ipairs(entries) do
         local state = EntryState(e, now, cfg)
         local prev = e._prevState
+
+        -- TTS: dispara una sola vez por entry cuando el tiempo restante hasta el
+        -- trigger cae bajo cfg.ttsLeadTime. Independiente de la state machine
+        -- pre/active porque ttsLeadTime suele ser menor que leadTime (1s vs 3s).
+        -- _spoken se resetea al cargar nuevas entries (ENCOUNTER_START / Test).
+        if cfg.ttsEnabled and not e._spoken and not e.consumed then
+            local ttsLead = cfg.ttsLeadTime or 1
+            local remaining = e.time - now
+            if remaining <= ttsLead and remaining > -0.5 then
+                SpeakSpell(e.spellID, cfg)
+                e._spoken = true
+            end
+        end
 
         -- Transiciones (one-shot):
         if state ~= prev then
@@ -570,9 +680,9 @@ local function LoadEntriesForEncounter(encounterID, difficultyID)
     else
         entries = {}
     end
-    -- Reset runtime state (consumed flags) — entries fueron re-parseadas asi
-    -- que ya vienen limpias, pero esto es por si en el futuro reusamos.
-    for _, e in ipairs(entries) do e.consumed = nil end
+    -- Reset runtime state (consumed/_spoken flags) — entries fueron re-parseadas
+    -- asi que ya vienen limpias, pero esto es por si en el futuro reusamos.
+    for _, e in ipairs(entries) do e.consumed = nil; e._spoken = nil end
 end
 ns.MrtLoadEntriesForEncounter = LoadEntriesForEncounter
 
@@ -658,7 +768,7 @@ function ns:MrtTimelineTest(noteIndex)
     inEncounter = true
     isTestEncounter = true
     entries = ParseNote(note.text or "")
-    for _, e in ipairs(entries) do e.consumed = nil end
+    for _, e in ipairs(entries) do e.consumed = nil; e._spoken = nil end
     C_Timer.After(90, function()
         if inEncounter and isTestEncounter then EndEncounter() end
     end)

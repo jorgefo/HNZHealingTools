@@ -4,4 +4,8 @@ local _, ns = ...
 -- file just needs to exist (the metatable in Locales.lua falls back to the key
 -- when no override is present). We still register an empty table so Locales.lua
 -- can pick enUS as the active locale on English clients without warnings.
-ns.RegisterLocale("enUS", {})
+ns.RegisterLocale("enUS", {
+    -- Alpha tag para la feature de Raid Spells comms (broadcast de cooldowns
+    -- entre healers). Cuando salga de alpha, borrar este override.
+    ["Raid Spells"] = "Raid Spells Alpha",
+})

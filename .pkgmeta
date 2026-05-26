@@ -22,7 +22,12 @@ wago-id: qGZOkoNd
 enable-nolib-creation: no
 
 # Use the existing CHANGELOG.md instead of auto-generating one from commits.
-manual-changelog: CHANGELOG.md
+# Sin `markup-type: markdown`, el packager sube el changelog como plain text y
+# CurseForge muestra los `#`, `**`, `[..](..)` literales en vez de
+# renderizarlos. El form expandido es obligatorio para fijar el markup type.
+manual-changelog:
+  filename: CHANGELOG.md
+  markup-type: markdown
 
 # Exclude dev artifacts from the released zip.
 ignore:

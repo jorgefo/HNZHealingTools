@@ -361,6 +361,18 @@ function ns.GetSpellDisplayInfo(spellID)
     return name or tostring(spellID), icon
 end
 
+-- Per-entry custom icon override. Si entry.customIconID es un numero > 0 lo
+-- devuelve; si no, devuelve el fallback (típicamente el iconID del spell/item).
+-- Centraliza el "usa el icono natural por defecto, salvo que el usuario haya
+-- forzado uno" para que todos los displays se comporten igual.
+function ns.GetEntryIcon(entry, fallback)
+    if entry then
+        local cid = tonumber(entry.customIconID)
+        if cid and cid > 0 then return cid end
+    end
+    return fallback
+end
+
 -- Devuelve el spellID que el usuario seleccionó del autocomplete (si está
 -- vigente y el texto del editbox no se ha editado), o el resultado de
 -- GetSpellIDFromInput sobre el texto. El path de ID directo evita

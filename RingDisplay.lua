@@ -127,6 +127,7 @@ local function UpdateRings()
         local entry = t.entry
         local color = entry.color or {r=1,g=1,b=1,a=1}
         local _, ic = ns.GetSpellDisplayInfo(entry.spellID)
+        ic = ns.GetEntryIcon(entry, ic)
         ringIndex = ringIndex + 1
         local ring = GetOrCreateRing(ringIndex)
         SetRingColor(ring, color.r, color.g, color.b, color.a)
@@ -181,7 +182,7 @@ local function UpdateRings()
                     SetRingProgress(ring, 1.0)
                 end
 
-                if entry.showIcon then ring.iconTex:SetTexture(status.icon); ring.iconFrame:Show()
+                if entry.showIcon then ring.iconTex:SetTexture(ns.GetEntryIcon(entry, status.icon)); ring.iconFrame:Show()
                 else ring.iconFrame:Hide() end
 
                 ring:Show()

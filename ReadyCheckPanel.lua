@@ -184,8 +184,11 @@ local KNOWN_BUFF_SPELLIDS = {
     wellFed = {
         1232585, -- Well Fed aura desde food no listada (reportado 2026-05-17)
         1285644, -- Well Fed aura desde food no listada (reportado 2026-05-17)
+        1233724, -- Well Fed aura desde food no listada (reportado 2026-05-24)
     },
-    flask = {},
+    flask = {
+        1235108, -- Phial aura desde caldero de banda (reportado 2026-05-25)
+    },
     augmentRune = {},
     weaponImbue = {},
 }
@@ -428,11 +431,12 @@ local function CheckFlask()
 end
 
 -- Resuelve la categoria de contenido actual a partir del estado del juego.
--- Devuelve "raid" / "mplus" / "dungeon" / "pvp" / "delve" / nil.
+-- Devuelve "raid" / "dungeon" / "pvp" / "delve" / nil.
 --
--- M+ requiere chequear C_ChallengeMode (un dungeon comun es instanceType
--- "party"; un M+ activo agrega un keystone que se detecta con
--- GetActiveChallengeMapID > 0).
+-- Dungeon y M+ se mergean: el ready check ocurre en el lobby ANTES de meter
+-- la keystone (GetActiveChallengeMapID seria 0 ahi), asi que distinguirlos
+-- en runtime no aporta valor — el user nunca configura distinto para uno y
+-- otro. Loadouts marcados "Dungeon / M+" cubren ambos.
 -- Delves: en TWW+ son scenarios pero comparten ese flag con otros scenarios
 -- (e.g., follower dungeons). C_DelvesUI.IsInActiveDelveTier no siempre existe
 -- en Midnight, asi que usamos "scenario" como heuristica simple. El user
@@ -443,12 +447,7 @@ local function GetCurrentContentType()
     if not itype or itype == "none" then return nil end
     if itype == "raid" then return "raid" end
     if itype == "pvp" or itype == "arena" then return "pvp" end
-    if itype == "party" then
-        local cm = C_ChallengeMode and C_ChallengeMode.GetActiveChallengeMapID
-            and C_ChallengeMode.GetActiveChallengeMapID()
-        if cm and cm > 0 then return "mplus" end
-        return "dungeon"
-    end
+    if itype == "party" then return "dungeon" end
     if itype == "scenario" then return "delve" end
     return nil
 end
@@ -486,14 +485,26 @@ local function CheckTalentLoadout()
         and C_ClassTalents.GetConfigIDsBySpecID(specID) or {}
     for _, cid in ipairs(configs) do
         local data = stored[tostring(cid)]
-        if type(data) == "table" and data[contentType] == true then
-            expectedID = cid
-            break
+        if type(data) == "table" then
+            -- Backwards compat: pre-merge la categoria mplus era separada de
+            -- dungeon. Aceptamos cualquiera de los dos cuando contentType es
+            -- "dungeon" para no obligar al user a re-marcar el checkbox.
+            local matches = data[contentType] == true
+            if not matches and contentType == "dungeon" and data.mplus == true then
+                matches = true
+            end
+            if matches then
+                expectedID = cid
+                break
+            end
         end
     end
 
     if not expectedID then
-        return { ok = true, mode = "neutral", activeName = activeName }
+        -- Sin loadout asignado a este contentType. Pasamos contentType al
+        -- renderer para que muestre un warning especifico — antes este branch
+        -- se veia identico a un loadout-OK y el user lo leia como "todo bien".
+        return { ok = true, mode = "unassigned", activeName = activeName, contentType = contentType }
     end
     if expectedID == activeID then
         return { ok = true, mode = "match", activeName = activeName }
@@ -508,7 +519,21 @@ local function CheckTalentLoadout()
         activeName = activeName,
         expectedName = expectedName or "?",
         expectedID = expectedID,
+        contentType = contentType,
     }
+end
+
+-- Mapeo contentType -> label localizado para el row de talent loadout.
+local CONTENT_TYPE_LABELS = {
+    raid    = "Raid",
+    dungeon = "Dungeon / M+",
+    pvp     = "PvP",
+    delve   = "Delve",
+}
+local function GetContentTypeLabel(ct)
+    local k = CONTENT_TYPE_LABELS[ct]
+    if not k then return ct or "?" end
+    return (ns.L and ns.L[k]) or k
 end
 
 local function CheckHealthstone()
@@ -1288,12 +1313,29 @@ local function ClearSubRow(row)
     row:Hide()
 end
 
+-- Helper de anclaje compartido por panel + anchor preview. Si el user nunca
+-- dragueo (positionUserSet=false / nil), anclamos a TOP del UIParent con un
+-- offsetY pequeño para que quede pegado al borde superior centro de la
+-- pantalla siempre, sin importar la resolucion. Una vez draggeado, persistimos
+-- el offset y volvemos al modo "CENTER + (offsetX, offsetY)" clasico.
+local DEFAULT_TOP_OFFSET_Y = -40
+local function ApplyPanelAnchor(frame)
+    if not frame then return end
+    local s = GetSettings() or {}
+    frame:ClearAllPoints()
+    if s.positionUserSet then
+        frame:SetPoint("CENTER", UIParent, "CENTER", s.offsetX or 0, s.offsetY or 200)
+    else
+        frame:SetPoint("TOP", UIParent, "TOP", 0, DEFAULT_TOP_OFFSET_Y)
+    end
+end
+
 local function CreatePanelFrame()
     local s = GetSettings() or {}
     local f = CreateFrame("Frame", "HNZHealingToolsReadyCheckPanel", UIParent, "BackdropTemplate")
     f:SetFrameStrata("HIGH"); f:SetFrameLevel(180)
     f:SetSize(s.width or 280, 100)
-    f:SetPoint("CENTER", UIParent, "CENTER", s.offsetX or 0, s.offsetY or 200)
+    ApplyPanelAnchor(f)
     f:SetClampedToScreen(true)
     -- EnableMouse(true) para capturar drag. Los click-to-use buttons de los
     -- sub-rows son children con OnClick propio — Blizzard les da prioridad de
@@ -1309,17 +1351,16 @@ local function CreatePanelFrame()
         -- Persistir nueva posicion relativa a UIParent CENTER. StartMoving
         -- cambia el anchor a UIParent BOTTOMLEFT, asi que computamos delta
         -- via centers para conservar el contrato del config (offset desde
-        -- center de pantalla).
+        -- center de pantalla). Marcar positionUserSet para que ApplyPanelAnchor
+        -- abandone el default top-center y use estos offsets en adelante.
         local cx, cy = self:GetCenter()
         local pcx, pcy = UIParent:GetCenter()
         local cfg = GetSettings()
         if cx and pcx and cfg then
             cfg.offsetX = math.floor((cx - pcx) + 0.5)
             cfg.offsetY = math.floor((cy - pcy) + 0.5)
-            -- Re-anchor a CENTER+offsets para que sobreviva resizes de UIParent
-            -- y refrescos posteriores.
-            self:ClearAllPoints()
-            self:SetPoint("CENTER", UIParent, "CENTER", cfg.offsetX, cfg.offsetY)
+            cfg.positionUserSet = true
+            ApplyPanelAnchor(self)
         end
     end)
     f:Hide()
@@ -1442,6 +1483,778 @@ end
 
 local MAX_SUBROWS_PER_KIND = 5
 
+-- ============================================================
+-- Grid sections (horizontal): titulo + icons + boton abajo
+-- ============================================================
+-- Cada seccion es una unidad reutilizable: titulo centrado arriba + grid
+-- horizontal de cells. Cada cell = icono (32x32) + boton secure (Pedir/Lanzar/
+-- Usar) abajo. El cell puede representar:
+--   - Class buff (icono del spell, boton Pedir whisper / Lanzar self-cast)
+--   - Item de bolsa (icono del item + count badge, boton Usar)
+--   - Self-cast imbue (icono del spell del spec, boton Lanzar)
+-- Tooltip on hover: spell tooltip o item tooltip segun lo que tenga la cell.
+
+-- Tamaño base del icono y de la cell. Iteracion: empezamos en 22/28, el user
+-- pidio "un poco mas grande", subimos a 28/34 (+27% area de icono). Si una
+-- seccion no cabe en su contentWidth (p.ej. cuando empareja con otra a
+-- half-width), aplicamos shrink adaptativo hasta MIN_ICON_SIZE / MIN_CELL_W.
+local CB_ICON_SIZE = 28
+local CB_BUTTON_H  = 14
+local CB_GAP_Y     = 2
+local CB_GAP_X     = 4
+local CB_CELL_W    = 34
+local CB_TITLE_H   = 13
+local CB_TITLE_GAP = 2
+local MIN_CELL_W   = 22
+local MIN_ICON_SIZE = 18
+
+-- Cell genericamente reutilizable. El render setea iconFrame._spellID o
+-- ._itemID segun la fuente del cell; el OnEnter elige el tooltip a mostrar.
+--
+-- iconFrame es SecureActionButton: al clickear el icono se dispara la misma
+-- accion que el boton de label de abajo. Mirroramos los attributes en
+-- ConfigureCell para que ambos clicks (icono o label) ejecuten lo mismo.
+local function CreateGridCell(parent)
+    local c = CreateFrame("Frame", nil, parent)
+    c:SetSize(CB_CELL_W, CB_ICON_SIZE + CB_GAP_Y + CB_BUTTON_H)
+
+    local iconFrame = CreateFrame("Button", nil, c, "SecureActionButtonTemplate")
+    iconFrame:SetSize(CB_ICON_SIZE, CB_ICON_SIZE)
+    iconFrame:SetPoint("TOP", c, "TOP", 0, 0)
+    iconFrame:RegisterForClicks("AnyUp", "AnyDown")
+    iconFrame:SetScript("OnEnter", function(self)
+        if not GameTooltip then return end
+        if self._spellID then
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            GameTooltip:SetSpellByID(self._spellID)
+            GameTooltip:Show()
+        elseif self._itemID then
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            GameTooltip:SetItemByID(self._itemID)
+            GameTooltip:Show()
+        end
+    end)
+    iconFrame:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
+    -- Highlight sutil al hover sobre el icono para que se sienta clickeable.
+    local iconHL = iconFrame:CreateTexture(nil, "HIGHLIGHT")
+    iconHL:SetAllPoints(); iconHL:SetColorTexture(1, 1, 1, 0.18); iconHL:SetBlendMode("ADD")
+    iconFrame:SetHighlightTexture(iconHL)
+    -- Mismo PostClick que el btn-label: si la cell es eating-capable, arranca
+    -- el countdown al click sobre el icono tambien.
+    iconFrame:SetScript("PostClick", function(self)
+        local cell = self:GetParent()
+        if cell._eatingKind and cell._eatingItemID then
+            StartEatingTimer(cell._eatingKind, cell._eatingItemID)
+            ForceRender()
+        end
+    end)
+    c.iconFrame = iconFrame
+
+    local tex = iconFrame:CreateTexture(nil, "ARTWORK")
+    tex:SetAllPoints(iconFrame)
+    tex:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+    c.icon = tex
+
+    -- Count badge (bottom-right del icono). Para item cells; class buff cells
+    -- lo dejan vacio.
+    local count = iconFrame:CreateFontString(nil, "OVERLAY", "NumberFontNormalSmall")
+    count:SetPoint("BOTTOMRIGHT", iconFrame, "BOTTOMRIGHT", -1, 1)
+    count:SetTextColor(1, 1, 0.6)
+    count:SetText("")
+    c.count = count
+
+    -- Time-remaining overlay (top-left del icono). Para buffs activos con
+    -- duracion conocida (class buffs, eventualmente food/flask si se quisiera
+    -- pintar per-cell). Pequeno y con outline para legibilidad sobre el icono.
+    local timeText = iconFrame:CreateFontString(nil, "OVERLAY", "NumberFontNormalSmall")
+    timeText:SetPoint("TOPLEFT", iconFrame, "TOPLEFT", 0, -1)
+    timeText:SetTextColor(1, 1, 0.75)
+    timeText:SetText("")
+    c.timeText = timeText
+
+    local btn = CreateFrame("Button", nil, c, "SecureActionButtonTemplate")
+    btn:SetSize(CB_CELL_W - 2, CB_BUTTON_H)
+    btn:SetPoint("TOP", iconFrame, "BOTTOM", 0, -CB_GAP_Y)
+    btn:RegisterForClicks("AnyUp", "AnyDown")
+    local bg = btn:CreateTexture(nil, "BACKGROUND"); bg:SetAllPoints()
+    btn.bg = bg
+    local border = btn:CreateTexture(nil, "BORDER"); border:SetAllPoints()
+    btn.border = border
+    local lbl = btn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    lbl:SetPoint("CENTER")
+    lbl:SetTextColor(1, 1, 1)
+    RegisterScalable(lbl, 9)
+    btn.label = lbl
+    local hl = btn:CreateTexture(nil, "HIGHLIGHT")
+    hl:SetAllPoints(); hl:SetColorTexture(1, 1, 1, 0.15); hl:SetBlendMode("ADD")
+    btn:SetHighlightTexture(hl)
+    -- PostClick: si la cell fue marcada como "eating-capable" (food/drink),
+    -- arranca el countdown 10s al click. ForceRender para que el panel
+    -- repinte el state inmediatamente.
+    btn:SetScript("PostClick", function(self)
+        local cell = self:GetParent()
+        if cell._eatingKind and cell._eatingItemID then
+            StartEatingTimer(cell._eatingKind, cell._eatingItemID)
+            ForceRender()
+        end
+    end)
+    c.btn = btn
+
+    return c
+end
+
+-- Cada seccion vive en un Frame dedicado dentro del panel (con su pool de
+-- cells + titulo + status indicator). Cacheamos por `key` para reusar entre
+-- renders. EnsureGridSection crea on-demand; AcquireGridCell crea pool entries
+-- on-demand. Ambos respetan InCombatLockdown (no se pueden crear secure
+-- frames in-combat).
+local function EnsureGridSection(parent, key)
+    parent._gridSections = parent._gridSections or {}
+    if parent._gridSections[key] then return parent._gridSections[key] end
+    local g = CreateFrame("Frame", nil, parent)
+    g._cells = {}
+
+    local title = g:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    title:SetPoint("TOP", g, "TOP", 0, 0)
+    title:SetTextColor(0.75, 0.85, 1.0)
+    RegisterScalable(title, 11)
+    g.titleText = title
+
+    -- Status icon a la derecha del titulo (✓/✗) — pequeño indicador.
+    local status = g:CreateTexture(nil, "OVERLAY")
+    status:SetSize(12, 12)
+    status:SetPoint("LEFT", title, "RIGHT", 4, 0)
+    status:SetTexCoord(0, 1, 0, 1)
+    g.statusIcon = status
+
+    parent._gridSections[key] = g
+    return g
+end
+
+local function AcquireGridCell(section, index)
+    local c = section._cells[index]
+    if c then return c end
+    if InCombatLockdown() then return nil end -- secure btn create lock
+    c = CreateGridCell(section)
+    section._cells[index] = c
+    return c
+end
+
+-- Reset attrs en una cell — usado para limpiar el secure btn en cells
+-- visibles cuyo entry no tiene boton (buff OK, no items, etc.). Ambos
+-- iconFrame y btn son SecureActionButton y comparten attrs.
+local function ClearCellButton(cell)
+    if InCombatLockdown() then return end
+    cell.btn:SetAttribute("type", nil)
+    cell.btn:SetAttribute("spell", nil)
+    cell.btn:SetAttribute("item", nil)
+    cell.btn:SetAttribute("macrotext", nil)
+    cell.iconFrame:SetAttribute("type", nil)
+    cell.iconFrame:SetAttribute("spell", nil)
+    cell.iconFrame:SetAttribute("item", nil)
+    cell.iconFrame:SetAttribute("macrotext", nil)
+    cell._eatingKind = nil
+    cell._eatingItemID = nil
+end
+
+-- ============================================================
+-- Cell glow (lineas moviendose alrededor del icono)
+-- ============================================================
+-- Custom glow: 4 segmentos cortos que trasladan en sentido horario alrededor
+-- del perimetro del iconFrame. Reusamos el mismo glow frame con un OnUpdate
+-- que recomputa posiciones en cada frame. Comparado con la fade-in/out de
+-- alpha clasica, el movimiento da el efecto "tipico WoW" que el user pidio.
+local GLOW_SPEED       = 36     -- pixeles por segundo
+local GLOW_SEG_LEN     = 8      -- largo de cada segmento (px en eje de movimiento)
+local GLOW_SEG_THICK   = 2      -- grosor (px perpendicular al eje)
+local GLOW_COLOR       = { 1.0, 0.85, 0.2 } -- dorado tipo proc
+
+local function EnsureCellGlow(iconFrame)
+    if iconFrame._glow then return iconFrame._glow end
+    local g = CreateFrame("Frame", nil, iconFrame)
+    g:SetAllPoints(iconFrame)
+    g:SetFrameLevel(iconFrame:GetFrameLevel() + 5)
+    g._segs = {}
+    for i = 1, 4 do
+        local t = g:CreateTexture(nil, "OVERLAY")
+        t:SetTexture("Interface\\Buttons\\WHITE8x8")
+        t:SetVertexColor(GLOW_COLOR[1], GLOW_COLOR[2], GLOW_COLOR[3], 0.95)
+        g._segs[i] = t
+    end
+    g._t0 = GetTime()
+    g:SetScript("OnUpdate", function(self)
+        local w, h = iconFrame:GetWidth(), iconFrame:GetHeight()
+        if not w or not h or w <= 0 or h <= 0 then return end
+        local perimeter = 2 * (w + h)
+        local elapsed = GetTime() - self._t0
+        local offset = (elapsed * GLOW_SPEED) % perimeter
+        for i, seg in ipairs(self._segs) do
+            local p = (offset + (i - 1) * (perimeter / 4)) % perimeter
+            local sx, sy, sw, sh
+            if p < w then
+                -- top edge, moving right
+                sx, sy = p, 0
+                sw, sh = GLOW_SEG_LEN, GLOW_SEG_THICK
+            elseif p < w + h then
+                -- right edge, moving down
+                sx, sy = w - GLOW_SEG_THICK, p - w
+                sw, sh = GLOW_SEG_THICK, GLOW_SEG_LEN
+            elseif p < 2 * w + h then
+                -- bottom edge, moving left
+                sx = w - (p - w - h) - GLOW_SEG_LEN
+                sy = h - GLOW_SEG_THICK
+                sw, sh = GLOW_SEG_LEN, GLOW_SEG_THICK
+            else
+                -- left edge, moving up
+                sx = 0
+                sy = h - (p - 2 * w - h) - GLOW_SEG_LEN
+                sw, sh = GLOW_SEG_THICK, GLOW_SEG_LEN
+            end
+            seg:SetSize(sw, sh)
+            seg:ClearAllPoints()
+            -- iconFrame anchor: BOTTOMLEFT -> (sx, h - sy - sh) en coords
+            -- internas, pero SetPoint usa offset desde el anchor del parent.
+            -- Usamos TOPLEFT del iconFrame y offsets negativos en Y.
+            seg:SetPoint("TOPLEFT", iconFrame, "TOPLEFT", sx, -sy)
+        end
+    end)
+    g:Hide()
+    iconFrame._glow = g
+    return g
+end
+
+local function SetCellGlow(iconFrame, on)
+    if not iconFrame then return end
+    if on then
+        local g = EnsureCellGlow(iconFrame)
+        if not g:IsShown() then
+            g._t0 = GetTime() -- reset fase al primer show para evitar saltos
+            g:Show()
+        end
+    else
+        if iconFrame._glow then iconFrame._glow:Hide() end
+    end
+end
+
+local GLOW_THRESHOLD_SECS = 10 * 60 -- <10min triggerea el glow
+
+-- Pinta una cell con datos genericos. `data` table fields:
+--   icon, spellID, itemID, count, ok, kind  (visuals + tooltip + eating)
+--   btnLabel, btnAction = { type=..., spell=..., item=..., macrotext=... }
+--   btnBgColor = {r,g,b,a}, btnBorderColor = {r,g,b,a}
+--   expirationTime — segundos absolutos (GetTime() reference). Si > now, la
+--                    cell muestra tiempo restante y activa glow si <10min.
+--   showTimeText  — true para imprimir "Xm" sobre el icono (class buffs).
+--                    false para items: solo se evalua el glow.
+local function ConfigureCell(cell, cellW, cellH, iconSize, btnH, fontScale, data)
+    cell:SetSize(cellW, cellH)
+    cell.iconFrame:SetSize(iconSize, iconSize)
+    if data.icon then
+        cell.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+        cell.icon:SetTexture(data.icon)
+    else
+        cell.icon:SetTexCoord(0, 1, 0, 1)
+        cell.icon:SetTexture(NOT_READY_TEX)
+    end
+    if data.ok then
+        cell.icon:SetVertexColor(1, 1, 1)
+        if cell.icon.SetDesaturated then cell.icon:SetDesaturated(false) end
+    else
+        cell.icon:SetVertexColor(0.85, 0.55, 0.55)
+        if cell.icon.SetDesaturated then cell.icon:SetDesaturated(true) end
+    end
+    cell.iconFrame._spellID = data.spellID
+    cell.iconFrame._itemID = data.itemID
+
+    if data.count and data.count > 1 then
+        cell.count:SetText(tostring(data.count))
+    else
+        cell.count:SetText("")
+    end
+
+    -- Tiempo restante + glow. `expirationTime` puede venir per-cell (class
+    -- buffs) o repetido entre cells de la misma seccion (foods/flasks/runas:
+    -- todas las cells comparten la expiracion del buff vigente).
+    local remaining = nil
+    if data.expirationTime and data.expirationTime > 0 then
+        remaining = data.expirationTime - GetTime()
+    end
+    if remaining and remaining > 0 then
+        if data.showTimeText then
+            cell.timeText:SetText(FormatTimeRemaining(data.expirationTime))
+        else
+            cell.timeText:SetText("")
+        end
+        SetCellGlow(cell.iconFrame, remaining < GLOW_THRESHOLD_SECS)
+    else
+        cell.timeText:SetText("")
+        SetCellGlow(cell.iconFrame, false)
+    end
+
+    cell.btn:SetSize(cellW - 2, btnH)
+    if data.btnAction and data.btnAction.type then
+        if not InCombatLockdown() then
+            cell.btn:SetAttribute("type", data.btnAction.type)
+            cell.btn:SetAttribute("spell", data.btnAction.spell)
+            cell.btn:SetAttribute("item", data.btnAction.item)
+            cell.btn:SetAttribute("macrotext", data.btnAction.macrotext)
+            -- Mirror al iconFrame para que el click sobre el icono dispare
+            -- la misma accion que el boton de label.
+            cell.iconFrame:SetAttribute("type", data.btnAction.type)
+            cell.iconFrame:SetAttribute("spell", data.btnAction.spell)
+            cell.iconFrame:SetAttribute("item", data.btnAction.item)
+            cell.iconFrame:SetAttribute("macrotext", data.btnAction.macrotext)
+        end
+        cell.btn.label:SetText(data.btnLabel or "")
+        if data.btnBgColor then
+            cell.btn.bg:SetColorTexture(data.btnBgColor[1], data.btnBgColor[2], data.btnBgColor[3], data.btnBgColor[4] or 0.5)
+        end
+        if data.btnBorderColor then
+            cell.btn.border:SetColorTexture(data.btnBorderColor[1], data.btnBorderColor[2], data.btnBorderColor[3], data.btnBorderColor[4] or 0.7)
+        end
+        ApplyFontScale(cell.btn.label, fontScale)
+        -- Eating timer marker — el PostClick lo lee.
+        cell._eatingKind = data.eatingKind
+        cell._eatingItemID = data.eatingItemID
+        cell.btn:Show()
+    else
+        ClearCellButton(cell)
+        cell.btn:Hide()
+    end
+end
+
+-- Hide TODAS las secciones cacheadas. Usado al inicio de Render para que las
+-- que no se vuelven a poblar queden ocultas (en lugar de mantener su ultimo
+-- estado).
+local function HideAllGridSections(panel)
+    if not panel._gridSections then return end
+    for _, g in pairs(panel._gridSections) do g:Hide() end
+end
+
+-- Calcula tamaño de cell adaptado al contentWidth disponible. Cuando una
+-- seccion comparte fila con otra (half-width), el contentWidth se reduce y
+-- los cells naturales pueden no caber — encogemos hasta MIN_*.
+local function ComputeCellSize(count, contentWidth, fontScale)
+    local scale = mathmax(1.0, fontScale * 0.85)
+    local naturalCellW = mathfloor(CB_CELL_W * scale + 0.5)
+    local naturalIcon  = mathfloor(CB_ICON_SIZE * scale + 0.5)
+    local btnH         = mathfloor(CB_BUTTON_H * scale + 0.5)
+
+    if count <= 0 then
+        return naturalCellW, naturalIcon, btnH
+    end
+    local totalW = count * naturalCellW + (count - 1) * CB_GAP_X
+    if totalW <= contentWidth then
+        return naturalCellW, naturalIcon, btnH
+    end
+
+    local shrunkCellW = mathfloor((contentWidth - (count - 1) * CB_GAP_X) / count)
+    shrunkCellW = mathmax(MIN_CELL_W, shrunkCellW)
+    local shrunkIcon = mathmax(MIN_ICON_SIZE, shrunkCellW - 4)
+    return shrunkCellW, shrunkIcon, btnH
+end
+
+-- Render generico de una seccion. Retorna altura consumida.
+-- opts: { key, title, statusOk, cells (array), yPosFromTop, xOffset (default 8),
+--         contentWidth, fontScale, emptyText }
+local function RenderGridSection(panel, opts)
+    local section = EnsureGridSection(panel, opts.key)
+    section:ClearAllPoints()
+    section:SetPoint("TOPLEFT", panel, "TOPLEFT", opts.xOffset or 8, -opts.yPosFromTop)
+    section:SetWidth(opts.contentWidth)
+
+    local fontScale = opts.fontScale or 1.0
+    local cellW, iconSize, btnH = ComputeCellSize(#(opts.cells or {}), opts.contentWidth, fontScale)
+    local cellH    = iconSize + CB_GAP_Y + btnH
+    local titleH   = mathfloor(CB_TITLE_H * fontScale + 0.5)
+
+    -- Titulo + status indicator. Si la seccion tiene expirationTime (buff
+    -- activo), agregamos "  Xm" al titulo para que el user vea cuanto le queda
+    -- a este buff sin tener que mirar la barra de buffs por separado.
+    local titleStr = opts.title or ""
+    if opts.expirationTime and opts.expirationTime > GetTime() then
+        local timeStr = FormatTimeRemaining(opts.expirationTime)
+        if timeStr ~= "" then titleStr = titleStr .. "  " .. timeStr end
+    end
+    if opts.statusOk == false then
+        section.titleText:SetText(string.upper(titleStr))
+        section.titleText:SetTextColor(1.0, 0.25, 0.25)
+    else
+        section.titleText:SetText(titleStr)
+        section.titleText:SetTextColor(0.75, 0.85, 1.0)
+    end
+    ApplyFontScale(section.titleText, fontScale)
+    if opts.statusOk == true then
+        section.statusIcon:SetTexture(READY_TEX)
+        section.statusIcon:SetVertexColor(1, 1, 1)
+        section.statusIcon:Show()
+    elseif opts.statusOk == false then
+        section.statusIcon:SetTexture(NOT_READY_TEX)
+        section.statusIcon:SetVertexColor(1, 1, 1)
+        section.statusIcon:Show()
+    else
+        section.statusIcon:Hide()
+    end
+    local statusSize = mathfloor(12 * fontScale + 0.5)
+    section.statusIcon:SetSize(statusSize, statusSize)
+
+    local cells = opts.cells or {}
+    local count = #cells
+    local gridH = (count > 0) and cellH or mathfloor(14 * fontScale + 0.5)
+    local sectionH = titleH + CB_TITLE_GAP + gridH
+
+    if count == 0 then
+        -- Sin cells: mostramos solo titulo (con su status) y un mensaje
+        -- discreto debajo si corresponde. Aplica p.ej. cuando el kind no tiene
+        -- items en bolsa.
+        if opts.emptyText and opts.emptyText ~= "" then
+            section._emptyText = section._emptyText
+                or section:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+            section._emptyText:SetPoint("TOP", section.titleText, "BOTTOM", 0, -CB_TITLE_GAP)
+            section._emptyText:SetText(opts.emptyText)
+            section._emptyText:SetTextColor(1.0, 0.55, 0.55)
+            ApplyFontScale(section._emptyText, fontScale)
+            section._emptyText:Show()
+        elseif section._emptyText then
+            section._emptyText:Hide()
+        end
+        for i = 1, #section._cells do section._cells[i]:Hide() end
+        section:SetHeight(sectionH)
+        section:Show()
+        return sectionH + 4
+    end
+
+    if section._emptyText then section._emptyText:Hide() end
+
+    local totalW = count * cellW + (count - 1) * CB_GAP_X
+    local startX = mathfloor((opts.contentWidth - totalW) / 2 + 0.5)
+    if startX < 0 then startX = 0 end
+
+    local cellsTopY = titleH + CB_TITLE_GAP
+
+    for i, data in ipairs(cells) do
+        local cell = AcquireGridCell(section, i)
+        if cell then
+            cell:ClearAllPoints()
+            cell:SetPoint("TOPLEFT", section, "TOPLEFT",
+                startX + (i - 1) * (cellW + CB_GAP_X), -cellsTopY)
+            cell:Show()
+            ConfigureCell(cell, cellW, cellH, iconSize, btnH, fontScale, data)
+        end
+    end
+    for i = count + 1, #section._cells do section._cells[i]:Hide() end
+
+    section:SetHeight(sectionH)
+    section:Show()
+    return sectionH + 4
+end
+
+-- ===== Pairing config: kinds que se rendrizan side-by-side =====
+-- wellFed + flask comparten una fila; augmentRune + weaponImbue tambien. Si
+-- uno del par esta deshabilitado, el otro ocupa la fila completo (full width).
+local ITEM_GRID_KINDS = {
+    wellFed = true, flask = true, augmentRune = true, weaponImbue = true,
+}
+local KIND_PAIRS = {
+    { "wellFed",     "flask"       },
+    { "augmentRune", "weaponImbue" },
+}
+local KIND_TO_PAIR = {}
+for _, p in ipairs(KIND_PAIRS) do
+    KIND_TO_PAIR[p[1]] = p
+    KIND_TO_PAIR[p[2]] = p
+end
+
+local function GetItemGridTitle(kind)
+    if kind == "wellFed"     then return ns.L["Foods"]         or "Foods"         end
+    if kind == "flask"       then return ns.L["Flasks"]        or "Flasks"        end
+    if kind == "augmentRune" then return ns.L["Augment Runes"] or "Augment Runes" end
+    if kind == "weaponImbue" then return ns.L["Weapon Oils"]   or "Weapon Oils"   end
+    return kind
+end
+
+local function FindCheckDefByKind(k)
+    for _, d in ipairs(CHECKS) do
+        if d.kind == k then return d end
+    end
+    return nil
+end
+
+local function IsKindEnabled(def, s, categoriesEnabled)
+    if not def then return false end
+    if s[def.key] == false then return false end
+    if def.category and categoriesEnabled[def.category] == false then return false end
+    return true
+end
+
+-- Color tables compartidas entre cells de Use (items) y Cast (self-cast spells).
+-- Declaradas aca arriba para que tanto BuildHealthstoneCell (en
+-- CollectClassBuffEntries) como CollectItemCells las capturen como upvalues.
+local CELL_USE_BG     = { 0.40, 0.30, 0.55, 0.45 }  -- violeta sutil
+local CELL_USE_BORDER = { 0.65, 0.50, 0.85, 0.70 }
+local CELL_CAST_BG     = { 0.25, 0.55, 0.20, 0.5 }
+local CELL_CAST_BORDER = { 0.5,  0.9,  0.4,  0.7 }
+
+-- ===== Recopiladores de entries por seccion =====
+
+-- Cell de healthstone integrado al final de la fila de class buffs (a pedido
+-- del user). Tipo distinto al class buff: es un item, no un buff — por eso
+-- la fn anterior (CheckHealthstone) solo verificaba "tenes alguna en bolsa".
+-- Aca lo modelamos como cell con icono del item + count.
+--   - Con stone en bolsa: icon full color + count (sin boton — el item es
+--     combat-only y el panel aparece OOC en ready check, el boton "Use"
+--     no clickeable enganiaba al user)
+--   - Sin stone en bolsa + warlock no-self en grupo: icon dim + boton Ask
+--   - Sin stone + warlock soy yo: icon dim sin boton (cast desde action bar)
+local function BuildHealthstoneCell()
+    if not HasClassInGroup("WARLOCK") then return nil end
+    if not GetItemCount then return nil end
+
+    local foundID, foundCount
+    for _, id in ipairs(DEFAULT_USE_ITEMS.healthstone) do
+        local c = GetItemCount(id) or 0
+        if c > 0 then foundID = id; foundCount = c; break end
+    end
+
+    local iconID = foundID or DEFAULT_USE_ITEMS.healthstone[1]
+    local iconFile = (GetItemIcon and GetItemIcon(iconID)) or UNKNOWN_ITEM_ICON
+
+    if foundID then
+        return {
+            icon = iconFile,
+            itemID = foundID,
+            count = (foundCount and foundCount > 1) and foundCount or nil,
+            ok = true,
+        }
+    end
+
+    -- Sin healthstone en bolsa: ofrecer Ask al warlock si no soy yo.
+    local entry = {
+        icon = iconFile,
+        itemID = iconID,
+        ok = false,
+    }
+    local target = FindClassMember("WARLOCK")
+    if target and target ~= "SELF" then
+        entry.btnLabel = ns.L["Ask"] or "Ask"
+        entry.btnAction = {
+            type = "macro",
+            macrotext = "/w " .. target .. " Could you give me a Healthstone please?",
+        }
+        entry.btnBgColor     = { 0.2, 0.4, 0.65, 0.4 }
+        entry.btnBorderColor = { 0.4, 0.6, 1.0,  0.6 }
+    end
+    return entry
+end
+
+local function CollectClassBuffEntries(s)
+    local out = {}
+    for _, def in ipairs(CHECKS) do
+        if def.providerClass and s[def.key] ~= false then
+            local r = def.fn()
+            if r ~= nil then
+                local ok = false
+                if type(r) == "table" then ok = (r.ok == true)
+                elseif type(r) == "boolean" then ok = r end
+                local icon
+                if type(r) == "table" and r.icon then
+                    icon = r.icon
+                elseif def.spellID and C_Spell and C_Spell.GetSpellInfo then
+                    local info = C_Spell.GetSpellInfo(def.spellID)
+                    icon = info and info.iconID
+                end
+                local expirationTime = (type(r) == "table") and r.expirationTime or nil
+                local data = {
+                    icon = icon,
+                    spellID = def.spellID,
+                    ok = ok,
+                    expirationTime = expirationTime,
+                    showTimeText = true, -- class buffs muestran "Xm" en el icono
+                }
+                if not ok then
+                    local target = FindClassMember(def.providerClass)
+                    if target == "SELF" then
+                        data.btnLabel = ns.L["Cast"] or "Cast"
+                        data.btnAction = { type = "spell", spell = def.spellID }
+                        data.btnBgColor     = { 0.25, 0.55, 0.20, 0.5 }
+                        data.btnBorderColor = { 0.5,  0.9,  0.4,  0.7 }
+                    elseif target then
+                        data.btnLabel = ns.L["Ask"] or "Ask"
+                        data.btnAction = {
+                            type = "macro",
+                            macrotext = "/w " .. target .. " Could you Buff me please?",
+                        }
+                        data.btnBgColor     = { 0.2, 0.4, 0.65, 0.4 }
+                        data.btnBorderColor = { 0.4, 0.6, 1.0,  0.6 }
+                    end
+                end
+                table.insert(out, data)
+            end
+        end
+    end
+
+    -- Healthstone al final de la fila (pedido user). Gated por
+    -- checkHealthstone — el toggle existente. Reutiliza la misma row visual
+    -- en vez de ocupar una row dedicada.
+    if s.checkHealthstone ~= false then
+        local hs = BuildHealthstoneCell()
+        if hs then table.insert(out, hs) end
+    end
+
+    return out
+end
+
+-- Construye cells de items para un kind (bolsa). `selfCast` opcional (tabla
+-- {spellID=, icon=, ok=}) agrega una primera cell con boton Lanzar — usado
+-- por la seccion weaponImbue para incluir el self-cast imbue del spec.
+-- (CELL_USE_BG / CELL_USE_BORDER / CELL_CAST_BG / CELL_CAST_BORDER declarados
+-- arriba — ver el bloque sobre CollectClassBuffEntries.)
+
+-- Para click-to-apply de weapon oils/runes: queremos targetear automaticamente
+-- el slot del arma. Default a mainhand (16). Si el player dual-wieldea (offhand
+-- es un weapon, no shield), priorizamos el slot que TODAVIA no tiene encantamiento
+-- — asi un primer click va a MH si MH esta limpio, y el segundo click (despues
+-- de que el panel se re-renderea) va a OH automaticamente. Si ambos ya estan
+-- encantados, default a MH (WoW mostrara el popup nativo de "reemplazar?").
+-- General: aplica a cualquier clase con weapon en offhand (Monk, Rogue, Warrior
+-- Fury, DK Frost, DH, etc.). No hardcodeamos la lista de clases.
+local function OffhandIsWeapon()
+    if not (GetInventoryItemID and GetItemInfoInstant) then return false end
+    local id = GetInventoryItemID("player", 17)
+    if not id then return false end
+    local _, _, _, _, _, classID = GetItemInfoInstant(id)
+    return classID == 2 -- Weapon
+end
+
+local function PickWeaponEnchantSlot()
+    if not OffhandIsWeapon() then return 16 end
+    if not GetWeaponEnchantInfo then return 16 end
+    local hasMH, _, _, _, hasOH = GetWeaponEnchantInfo()
+    if not hasMH then return 16 end
+    if not hasOH then return 17 end
+    return 16 -- ambos enchanted; default MH (WoW maneja el replace prompt)
+end
+
+local function CollectItemCells(kind, isBuffActive, selfCast, expirationTime)
+    local out = {}
+
+    if selfCast and selfCast.spellID then
+        local icon = selfCast.icon
+        if not icon and C_Spell and C_Spell.GetSpellInfo then
+            local info = C_Spell.GetSpellInfo(selfCast.spellID)
+            icon = info and info.iconID
+        end
+        local entry = {
+            icon = icon,
+            spellID = selfCast.spellID,
+            ok = selfCast.ok == true,
+            -- Self-cast imbue (Shaman Earthliving / Rogue poison): si esta
+            -- activo, su buff aura tiene su propia expiracion; la propagamos
+            -- desde el section-level expirationTime asumiendo que el buff
+            -- detectado es el mismo. Glow + time text aplican igual.
+            expirationTime = (selfCast.ok and expirationTime) or nil,
+            showTimeText = true, -- self-cast queremos verlo con tiempo
+        }
+        if not entry.ok then
+            entry.btnLabel = ns.L["Cast"] or "Cast"
+            entry.btnAction = { type = "spell", spell = selfCast.spellID }
+            entry.btnBgColor     = CELL_CAST_BG
+            entry.btnBorderColor = CELL_CAST_BORDER
+        end
+        table.insert(out, entry)
+    end
+
+    local items = GetAvailableItems(kind) or {}
+    local shown = 0
+    for _, entry in ipairs(items) do
+        if shown >= MAX_SUBROWS_PER_KIND then break end
+        local itemID = entry.itemID
+        local iconFile = GetItemIcon and GetItemIcon(itemID)
+        if not iconFile then
+            iconFile = UNKNOWN_ITEM_ICON
+            if C_Item and C_Item.RequestLoadItemDataByID then
+                pcall(C_Item.RequestLoadItemDataByID, itemID)
+            end
+        end
+        -- Weapon oils/runes son items "two-phase": el primer /use pone el
+        -- aceite en el cursor (pending enchant), un /use <slot> a continuacion
+        -- lo aplica al arma sin requerir click en el paperdoll. Mismo truco
+        -- que usa Details / WeakAuras / etc. Macro multi-linea via "\n".
+        -- PickWeaponEnchantSlot decide MH vs OH dinamicamente: MH si no
+        -- esta enchanted, else OH si dual-wielding y OH sin enchant, else MH.
+        -- El panel re-renderea cada 0.5s, asi que despues de aplicar al MH el
+        -- proximo click target el OH automaticamente.
+        -- Para los demas kinds (foods/flasks/runas-de-aumento) un /use directo
+        -- via type="item" alcanza, no son two-phase.
+        local btnAction
+        if kind == "weaponImbue" then
+            local slot = PickWeaponEnchantSlot()
+            btnAction = {
+                type = "macro",
+                macrotext = "/use item:" .. itemID .. "\n/use " .. slot,
+            }
+        else
+            btnAction = { type = "item", item = "item:" .. itemID }
+        end
+
+        local data = {
+            icon = iconFile,
+            itemID = itemID,
+            count = entry.count,
+            -- Items siempre con icono full color — el status del buff se
+            -- comunica en el indicador ✓/✗ del titulo de seccion, no
+            -- desaturando los items (que estan disponibles en bolsa).
+            ok = true,
+            btnLabel = ns.L["Use"] or "Use",
+            btnAction = btnAction,
+            btnBgColor     = CELL_USE_BG,
+            btnBorderColor = CELL_USE_BORDER,
+            -- Tiempo restante del buff de la seccion. NO mostramos texto en
+            -- cada item (seria redundante — la misma expiracion repetida); el
+            -- texto va en el titulo de la seccion. Pero SI activamos el glow
+            -- per-cell cuando expira pronto: visualmente le dice "click aca
+            -- para refrescar antes que se vaya".
+            expirationTime = isBuffActive and expirationTime or nil,
+            showTimeText = false,
+        }
+        if CHANNELED_KINDS[kind] then
+            data.eatingKind = kind
+            data.eatingItemID = itemID
+        end
+        table.insert(out, data)
+        shown = shown + 1
+    end
+
+    return out
+end
+
+-- Renderiza la seccion de un kind individual (food/flask/runa/aceite) en el
+-- panel. Llama fn() del def, recolecta cells y delega en RenderGridSection.
+-- contentWidth/xOffset permiten layout side-by-side de pares.
+local function RenderItemKindSection(panel, def, contentWidth, xOffset, yPosFromTop, fontScale)
+    local result = def.fn()
+    if result == nil then return 0 end
+    local isOk = (type(result) == "table" and result.ok == true) or result == true
+    local expirationTime = (type(result) == "table") and result.expirationTime or nil
+    local selfCast
+    if def.isClassImbue and type(result) == "table" and result.spellID then
+        selfCast = { spellID = result.spellID, icon = result.icon, ok = isOk }
+    end
+    local cells = CollectItemCells(def.kind, isOk, selfCast, expirationTime)
+    return RenderGridSection(panel, {
+        key            = def.kind,
+        title          = GetItemGridTitle(def.kind),
+        statusOk       = isOk,
+        expirationTime = (isOk and expirationTime) or nil,
+        cells          = cells,
+        emptyText      = ns.L["No items in bag"] or "No items in bag",
+        yPosFromTop    = yPosFromTop,
+        xOffset        = xOffset,
+        contentWidth   = contentWidth,
+        fontScale      = fontScale,
+    })
+end
+
 Render = function()
     if not panelFrame then panelFrame = CreatePanelFrame() end
     local s = GetSettings() or {}
@@ -1454,8 +2267,11 @@ Render = function()
 
     panelFrame:SetWidth(width)
     panelFrame:SetAlpha(s.opacity or 0.95)
-    panelFrame:ClearAllPoints()
-    panelFrame:SetPoint("CENTER", UIParent, "CENTER", s.offsetX or 0, s.offsetY or 200)
+    -- IMPORTANTE: NO llamar ApplyPanelAnchor aca. Render se invoca cada 0.5s
+    -- (PollWhileShown) y reanchorar durante un drag activo pisa la posicion
+    -- del cursor — el frame "salta" de vuelta al anchor cada tick. El anchor
+    -- inicial lo setea CreatePanelFrame; OnDragStop lo re-setea con el nuevo
+    -- offset. No hay otro caso que requiera re-anchorar en runtime.
     panelFrame.title:SetText(ns.L["Ready Check"])
     ApplyFontScale(panelFrame.title, fontScale)
 
@@ -1506,9 +2322,103 @@ Render = function()
     local effectiveRowH = mathfloor(rowH * mathmax(1.0, fontScale * 0.9) + 0.5)
     local effectiveSubRowH = mathfloor(subRowH * mathmax(1.0, fontScale * 0.9) + 0.5)
 
+    -- Grid sections: hide TODAS las secciones cacheadas al inicio; las que
+    -- correspondan se vuelven a mostrar dentro del loop. Asi las secciones
+    -- que se apagaron (toggle off, sin items, etc.) no quedan colgadas con
+    -- su ultimo estado.
+    HideAllGridSections(panelFrame)
+
+    -- Class buffs renderizan como una unica seccion grid horizontal. El
+    -- primer def class-buff encontrado dispara el render; los demas se
+    -- skipean en el loop.
+    local classBuffsRendered = false
+    -- Kinds ya renderizados como parte de un par side-by-side. Se chequea
+    -- antes de renderizar para no duplicar cuando el loop visita el segundo
+    -- del par.
+    local renderedKinds = {}
+    -- Gap entre las dos secciones de un par cuando van side-by-side.
+    local PAIR_GAP_X = 8
+
     for _, def in ipairs(CHECKS) do
         local categoryOn = (not def.category) or (categoriesEnabled[def.category] ~= false)
         if s[def.key] ~= false and categoryOn then
+            if def.providerClass then
+                if not classBuffsRendered then
+                    local entries = CollectClassBuffEntries(s)
+                    if #entries > 0 then
+                        local h = RenderGridSection(panelFrame, {
+                            key = "classBuffs",
+                            title = ns.L["Class buffs"] or "Class buffs",
+                            statusOk = nil, -- mezcla de estados — sin indicator unico
+                            cells = entries,
+                            yPosFromTop = 24 + bannerOffset + yOffset,
+                            contentWidth = width - 16,
+                            fontScale = fontScale,
+                        })
+                        yOffset = yOffset + h
+                    end
+                    classBuffsRendered = true
+                end
+                -- siguientes class buff defs se skipean — la seccion ya los abarca
+            elseif def.kind == "healthstone" then
+                -- Caso normal: el cell se agrega como ultima entrada de la
+                -- seccion classBuffs (BuildHealthstoneCell) — no-op aca.
+                -- Edge case: checkClassBuffs OFF pero checkHealthstone ON +
+                -- warlock en grupo. Como el branch providerClass no se entra
+                -- cuando checkClassBuffs=false, hay que renderizar la seccion
+                -- aca con la lone healthstone cell para no perderla.
+                if not classBuffsRendered then
+                    local entries = CollectClassBuffEntries(s)
+                    if #entries > 0 then
+                        local h = RenderGridSection(panelFrame, {
+                            key = "classBuffs",
+                            title = ns.L["Class buffs"] or "Class buffs",
+                            statusOk = nil,
+                            cells = entries,
+                            yPosFromTop = 24 + bannerOffset + yOffset,
+                            contentWidth = width - 16,
+                            fontScale = fontScale,
+                        })
+                        yOffset = yOffset + h
+                    end
+                    classBuffsRendered = true
+                end
+            elseif def.kind and ITEM_GRID_KINDS[def.kind] then
+                if not renderedKinds[def.kind] then
+                    local pair = KIND_TO_PAIR[def.kind]
+                    local yPos = 24 + bannerOffset + yOffset
+
+                    if pair then
+                        local leftKind, rightKind = pair[1], pair[2]
+                        local leftDef  = FindCheckDefByKind(leftKind)
+                        local rightDef = FindCheckDefByKind(rightKind)
+                        local leftOn   = IsKindEnabled(leftDef,  s, categoriesEnabled)
+                        local rightOn  = IsKindEnabled(rightDef, s, categoriesEnabled)
+
+                        if leftOn and rightOn then
+                            local halfW = mathfloor((width - 16 - PAIR_GAP_X) / 2)
+                            local h1 = RenderItemKindSection(panelFrame, leftDef,
+                                halfW, 8, yPos, fontScale)
+                            local h2 = RenderItemKindSection(panelFrame, rightDef,
+                                halfW, 8 + halfW + PAIR_GAP_X, yPos, fontScale)
+                            yOffset = yOffset + mathmax(h1, h2)
+                            renderedKinds[leftKind]  = true
+                            renderedKinds[rightKind] = true
+                        else
+                            -- Solo el actual habilitado en el par — full width
+                            local h = RenderItemKindSection(panelFrame, def,
+                                width - 16, 8, yPos, fontScale)
+                            yOffset = yOffset + h
+                            renderedKinds[def.kind] = true
+                        end
+                    else
+                        local h = RenderItemKindSection(panelFrame, def,
+                            width - 16, 8, yPos, fontScale)
+                        yOffset = yOffset + h
+                        renderedKinds[def.kind] = true
+                    end
+                end
+            else
             local result = def.fn()
             if result ~= nil then
                 rowIndex = rowIndex + 1
@@ -1626,6 +2536,19 @@ Render = function()
                         row.label:SetTextColor(0.55, 1.0, 0.55)
                         row.icon:SetTexture(READY_TEX)
                         row.icon:SetVertexColor(1, 1, 1)
+                    elseif result.mode == "unassigned" then
+                        -- Sin loadout asignado al content type actual. Warning
+                        -- amarillo + X roja para que NO se confunda con "OK".
+                        -- El usuario debe ir a Config > Talents y marcar el
+                        -- checkbox correspondiente para uno de sus loadouts.
+                        local ctLabel = GetContentTypeLabel(result.contentType)
+                        local warnTpl = ns.L["No loadout assigned for %s"] or "No loadout assigned for %s"
+                        row.label:SetText((ns.L["Talent Build"] or "Talent Build")
+                            .. ": " .. result.activeName
+                            .. "  \194\183  " .. string.format(warnTpl, ctLabel))
+                        row.label:SetTextColor(1.0, 0.85, 0.35)
+                        row.icon:SetTexture(NOT_READY_TEX)
+                        row.icon:SetVertexColor(1.0, 0.85, 0.35)
                     else
                         row.label:SetText((ns.L["Talent Build"] or "Talent Build") .. ": " .. result.activeName)
                         row.label:SetTextColor(1, 1, 1)
@@ -1884,6 +2807,7 @@ Render = function()
                     end
                 end
             end
+            end -- cierra el else del `if def.providerClass`
         end
     end
 
@@ -1941,6 +2865,21 @@ function ns:TestReadyCheckPanel()
     end)
 end
 
+-- Toggle manual del panel (sin auto-hide). Pensado para el right-click del
+-- icono de minimap: el user lo abre cuando quiere ver el checklist sin
+-- esperar a un /readycheck real. Cerrar con segundo right-click o con la X
+-- del panel. Respeta el master toggle enabled (si el feature esta off, no
+-- abre nada). Llama Render() para refrescar el state antes de mostrar.
+function ns:ToggleReadyCheckPanel()
+    local s = GetSettings()
+    if not s or s.enabled == false then return end
+    if panelFrame and panelFrame:IsShown() then
+        HidePanel()
+        return
+    end
+    ShowPanel()
+end
+
 -- ============================================================
 -- Anchor draggable
 -- ============================================================
@@ -1949,7 +2888,7 @@ local function CreateAnchor()
     local s = GetSettings() or {}
     local a = CreateFrame("Frame", "HNZHealingToolsReadyCheckAnchor", UIParent, "BackdropTemplate")
     a:SetSize(s.width or 280, 60)
-    a:SetPoint("CENTER", UIParent, "CENTER", s.offsetX or 0, s.offsetY or 200)
+    ApplyPanelAnchor(a)
     a:SetFrameStrata("HIGH"); a:SetFrameLevel(150)
     a:SetMovable(true); a:EnableMouse(true); a:RegisterForDrag("LeftButton")
     a:SetClampedToScreen(true)
@@ -1982,13 +2921,10 @@ local function CreateAnchor()
             if d then
                 d.offsetX = mathfloor(sx - cx + 0.5)
                 d.offsetY = mathfloor(sy - cy + 0.5)
+                d.positionUserSet = true
             end
-            self:ClearAllPoints()
-            self:SetPoint("CENTER", UIParent, "CENTER", d and d.offsetX or 0, d and d.offsetY or 0)
-            if panelFrame then
-                panelFrame:ClearAllPoints()
-                panelFrame:SetPoint("CENTER", UIParent, "CENTER", d and d.offsetX or 0, d and d.offsetY or 0)
-            end
+            ApplyPanelAnchor(self)
+            if panelFrame then ApplyPanelAnchor(panelFrame) end
         end
     end)
 
@@ -1999,8 +2935,7 @@ function ns:RefreshReadyCheckPanelAnchor()
     if not ns._readyCheckAnchor then return end
     local s = GetSettings() or {}
     ns._readyCheckAnchor:SetWidth(s.width or 280)
-    ns._readyCheckAnchor:ClearAllPoints()
-    ns._readyCheckAnchor:SetPoint("CENTER", UIParent, "CENTER", s.offsetX or 0, s.offsetY or 200)
+    ApplyPanelAnchor(ns._readyCheckAnchor)
 end
 
 function ns:ShowReadyCheckPanelAnchor()

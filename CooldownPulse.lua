@@ -153,7 +153,7 @@ local function ProcessPulseSpell(entry, soundEnabledKey, soundNameKey, soundChan
         -- would be noisy.
         if prev == "COOLDOWN" and newSt == "READY" then
             local channel = soundChannelKey and entry[soundChannelKey] or nil
-            ns:ShowPulse(status.icon, status.name, entry[soundEnabledKey], entry[soundNameKey], channel)
+            ns:ShowPulse(ns.GetEntryIcon(entry, status.icon), status.name, entry[soundEnabledKey], entry[soundNameKey], channel)
         end
     end
     lastStatus[key] = newSt
@@ -181,7 +181,7 @@ local function ProcessPulseAura(entry)
                 icon = icon or i2
                 name = name or n2
             end
-            ns:ShowPulse(icon, name, entry.soundEnabled, entry.soundName, entry.soundChannel)
+            ns:ShowPulse(ns.GetEntryIcon(entry, icon), name, entry.soundEnabled, entry.soundName, entry.soundChannel)
         end
     end
     lastAuraActive[key] = active
@@ -344,7 +344,7 @@ function ns:TestPulseEntry(entry)
     local soundEnabled = entry.soundEnabled or entry.cdPulseSound
     local soundName = entry.soundName or entry.cdPulseSoundName
     local soundChannel = entry.soundChannel
-    ns:ShowPulse(ic, nm, soundEnabled, soundName, soundChannel, true)
+    ns:ShowPulse(ns.GetEntryIcon(entry, ic), nm, soundEnabled, soundName, soundChannel, true)
 end
 
 function ns:TestCooldownPulse()

@@ -83,6 +83,8 @@ ns.RegisterLocale("esES", {
     ["Hide status overlay"] = "Ocultar overlay de estado",
     ["Hide cooldown / duration timer"] = "Ocultar temporizador de cooldown/duración",
     ["Hide timer"] = "Ocultar temporizador",
+    ["Custom icon (file ID):"] = "Icono personalizado (file ID):",
+    ["Enter a texture file ID (e.g. 132159). Find IDs on Wowhead — most spell pages link to the icon's file ID. Leave unchecked to use the spell's default icon."] = "Ingresa un file ID de textura (ej. 132159). Búscalos en Wowhead — la mayoría de páginas de hechizo linkean al file ID del icono. Deja desmarcado para usar el icono por defecto del hechizo.",
     ["Specs:"] = "Especializaciones:",
     ["Required talent:"] = "Talento requerido:",
     ["Unit:"] = "Unidad:",
@@ -288,8 +290,10 @@ ns.RegisterLocale("esES", {
     -- ===== Minimap tooltip =====
     ["Left click:"] = "Click izquierdo:",
     ["Right click:"] = "Click derecho:",
+    ["Shift+Right click:"] = "Shift+Click derecho:",
     ["Drag:"] = "Arrastrar:",
     ["open/close config"] = "abrir/cerrar config",
+    ["open ready check panel"] = "abrir panel de ready check",
     ["toggle cursor + ring icons"] = "toggle iconos cursor + ring",
     ["move icon"] = "mover icono",
 
@@ -352,6 +356,13 @@ ns.RegisterLocale("esES", {
     ["MRT / NSRT"] = "MRT / NSRT",
     ["Show MRT/NSRT triggers"] = "Mostrar disparadores de MRT/NSRT",
     ["Play sound on trigger"] = "Reproducir sonido al disparar",
+    ["Voice (TTS)"] = "Voz (TTS)",
+    ["Announce spell name by voice"] = "Anunciar nombre del hechizo por voz",
+    ["TTS lead time (s)"] = "Anticipación de voz (s)",
+    ["TTS volume"] = "Volumen de voz",
+    ["Voice:"] = "Voz:",
+    ["Language:"] = "Idioma:",
+    ["Auto (client locale)"] = "Auto (idioma del cliente)",
     ["Apply"] = "Aplicar",
     ["Sparkle effect"] = "Destellos",
     ["Sparkle color"] = "Color del destello",
@@ -497,12 +508,22 @@ ns.RegisterLocale("esES", {
     ["Raid"]                         = "Banda",
     ["Mythic+"]                      = "Mítica+",
     ["Dungeon"]                      = "Mazmorra",
+    ["Dungeon / M+"]                 = "Mazmorra / M+",
     ["PvP"]                          = "JcJ",
     ["Delve"]                        = "Expedición",
+    ["No loadout assigned for %s"]   = "Sin loadout asignado para %s",
     ["Cast"]                         = "Lanzar",
     ["Ask"]                          = "Pedir",
+    ["Use"]                          = "Usar",
     ["(eating)"]                     = "(comiendo)",
     ["No items in bag"]              = "Sin items en la mochila",
+    -- Titulos de secciones grid en el panel de Ready Check (titulo centrado
+    -- arriba de cada fila horizontal de iconos + boton Pedir/Lanzar/Usar).
+    ["Class buffs"]                  = "Bufos de clase",
+    ["Foods"]                        = "Comidas",
+    ["Flasks"]                       = "Frascos",
+    ["Augment Runes"]                = "Runas de aumento",
+    ["Weapon Oils"]                  = "Aceites de arma",
     -- NOTA: los labels de los class buffs (Skyfury -> Abrasacielos, etc.) se
     -- resuelven en runtime via C_Spell.GetSpellInfo(spellID).name, asi que NO
     -- necesitamos traducirlos aqui. WoW devuelve el nombre oficial del juego
@@ -556,6 +577,24 @@ ns.RegisterLocale("esES", {
         "No hay objetos disponibles para auto-comprar ahora mismo.",
     [" already in restock list."]    = " ya está en la lista de compras.",
 
+    -- Panel "Shopping list" (toggle al hacer click en el boton flotante).
+    ["Shopping list"]                = "Lista de compras",
+    ["Buy"]                          = "Comprar",
+    ["Buy all"]                      = "Comprar todo",
+    ["Buying..."]                    = "Comprando...",
+    ["Total:"]                       = "Total:",
+    -- Indicadores de mail: cuando los items ya fueron comprados y estan
+    -- esperando en el correo, sumamos a un cache per-character escaneado en
+    -- MAIL_INBOX_UPDATE y los descontamos del 'need'.
+    ["in mail"]                      = "en correo",
+    ["bag"]                          = "mochila",
+    ["mail"]                         = "correo",
+    ["Already bought (in mail)"]     = "Ya comprado (en correo)",
+    ["mail scan:"]                   = "buzón escaneado hace:",
+    ["mail not scanned — open the mailbox"] =
+        "buzón sin escanear — abre el correo",
+    ["Check your mail"]              = "Revisa el correo",
+
     -- Mensajes del flujo de compra (cotizacion / popup / resultado).
     ["Quoting"]                      = "Cotizando",
     ["Purchase complete"]            = "Compra completada",
@@ -587,6 +626,56 @@ ns.RegisterLocale("esES", {
         "Si el costo total supera este monto, aparece un popup de confirmación aunque el umbral per-item no lo dispare.",
     ["Button settings"]              = "Ajustes del botón",
     ["or drag an item here:"]        = "o arrastra un objeto aquí:",
+
+    -- ===== Raid Healer Comms =====
+    ["Raid Spells"]                  = "Raid Hechizos (A)",
+    ["Waiting for healer casts..."]  = "Esperando casts de healers...",
+    ["Broadcasts your important healer cooldown casts to other raid members running HNZ Healing Tools, and shows a panel of what your fellow healers cast in the last 5 seconds."] =
+        "Difunde tus cooldowns de healer importantes al resto del grupo que use HNZ Healing Tools, y muestra un panel con lo que tus compañeros healers lanzaron en los últimos 5 segundos.",
+    ["Hide panel when no casts"]     = "Ocultar panel cuando no hay casts",
+    ["Show only on healer specs"]    = "Mostrar solo en specs healer",
+    ["Show only in raid"]            = "Mostrar solo en raid",
+    ["Reset position"]               = "Resetear posición",
+    ["Tracked spells"]               = "Hechizos rastreados",
+    ["Add by spell ID or exact name. Reset restores the curated default set (and re-picks up any new defaults added in future updates)."] =
+        "Añade por ID de hechizo o nombre exacto. Reset restaura el set curado por defecto (y recupera cualquier nuevo default añadido en futuras actualizaciones).",
+    ["Spell ID or name"]             = "ID o nombre del hechizo",
+    ["Reset to defaults"]            = "Restaurar valores por defecto",
+    ["Reset to defaults."]           = "Restaurado a valores por defecto.",
+    ["Enter a spell ID or name."]    = "Introduce un ID o nombre de hechizo.",
+    ["Unknown spell — check the ID or name."] =
+        "Hechizo desconocido — revisa el ID o el nombre.",
+    ["Spell already tracked."]       = "Ese hechizo ya está rastreado.",
+    ["Added: %s"]                    = "Añadido: %s",
+    ["Removed: %s"]                  = "Eliminado: %s",
+    ["Healer comms test preview shown. Click Hide to clear."] =
+        "Vista previa de Raid Hechizos Alpha mostrada. Click en Ocultar para limpiar.",
+
+    -- ===== Simulated Auras =====
+    ["Simulated Auras"]              = "Hechizos simulados (A)",
+    ["Curated list of spells whose aura the WoW API hides from addons. Enable a preset to track it as 'apply N stacks on cast, consume 1 per re-press'. Each preset includes the macro you need to copy into your action bar."] =
+        "Lista curada de hechizos cuya aura la API de WoW oculta a los addons. Habilita un preset para trackearlo como 'aplicar N stacks al castear, consumir 1 por cada press'. Cada preset incluye la macro que necesitas pegar en tu barra de acción.",
+    ["Stacks"]                       = "Cargas",
+    ["Duration"]                     = "Duración",
+    ["Enable"]                       = "Habilitar",
+    ["Disable"]                      = "Deshabilitar",
+    ["Instructions"]                 = "Instrucciones",
+    ["Hide instructions"]            = "Ocultar instrucciones",
+    ["Steps"]                        = "Pasos a seguir",
+    ["Macro (CTRL+C to copy)"]       = "Macro (CTRL+C para copiar)",
+    ["Close"]                        = "Cerrar",
+    ["No presets available for your class yet."] = "No hay presets disponibles para tu clase todavía.",
+    ["Status: disabled"]             = "Estado: deshabilitado",
+    ["Status: enabled, waiting for cast"] = "Estado: habilitado, esperando cast",
+    ["Status: active %d/%d cargas%s"] = "Estado: activo %d/%d cargas%s",
+    ["Test press fired: %s"]         = "Press de prueba disparado: %s",
+    ["Coming soon"]                  = "Próximamente",
+    ["A curated list of preset spells whose aura the WoW API hides from addons. Each preset will include the macro to copy into your action bar. The state machine is functional via the /hnzsim slash command but the UI integration is still in testing."] =
+        "Lista curada de hechizos cuya aura la API de WoW oculta a los addons. Cada preset incluirá la macro lista para copiar en tu barra de acción. El state machine ya funciona vía el comando /hnzsim pero la integración con el display sigue en pruebas.",
+    ["Enabled: %s"]                  = "Habilitado: %s",
+    ["Disabled: %s"]                 = "Deshabilitado: %s",
+    ["No simulated auras configured."] = "No hay hechizos simulados configurados.",
+    ["Configured simulated auras:"]  = "Hechizos simulados configurados:",
 
     -- Genericos compartidos con AuctionRestock que faltaban en otros idiomas.
     ["Hide"]                         = "Ocultar",

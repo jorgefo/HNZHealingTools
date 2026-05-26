@@ -231,8 +231,8 @@ end
 
 local function FindCdmAuraData(unit, spellID)
     local data = cdmData[unit]
-    if not data then return nil, nil end
-    local restrictedInfo
+    if not data then return nil, nil, nil end
+    local restrictedInfo, restrictedInstanceID
     for instanceID, info in pairs(data) do
         local match = (info.spellID == spellID)
         if not match and info.spellIDs then
@@ -243,17 +243,29 @@ local function FindCdmAuraData(unit, spellID)
         if match then
             if C_UnitAuras.GetAuraDataByAuraInstanceID then
                 local auraData = C_UnitAuras.GetAuraDataByAuraInstanceID(unit, instanceID)
-                if auraData then return auraData, info end
+                if auraData then return auraData, info, instanceID end
             end
             -- "Fully restricted": Blizzard CDM nos pinto el aura (capturamos
             -- spellID + appliedAt + stacks via FontString), pero GetAuraDataByAuraInstanceID
             -- nos devuelve nil. Conservamos `info` como restrictedInfo para que
             -- GetAuraStatus pueda sintetizar ACTIVE desde el dato del frame.
             -- La eviccion real ocurre via UNIT_AURA removedAuraInstanceIDs.
+            -- Tambien devolvemos el instanceID para que el caller pueda evictar
+            -- entries stale (ver sanity check en GetAuraStatus por expiracion).
             restrictedInfo = info
+            restrictedInstanceID = instanceID
         end
     end
-    return nil, restrictedInfo
+    return nil, restrictedInfo, restrictedInstanceID
+end
+
+-- Evict a stale CDM cache entry (e.g. cuando appliedAt + duration < now y el
+-- aura claramente expiro pero Blizzard nunca disparo UNIT_AURA removedAuraInstanceIDs
+-- — pasa al recargar mid-buff o en zone changes sin removed list).
+local function EvictCdmEntry(unit, instanceID)
+    if unit and instanceID and cdmData[unit] then
+        cdmData[unit][instanceID] = nil
+    end
 end
 
 -- Used by Config UI to decide whether to flag an aura with the !CDM badge.
@@ -454,6 +466,11 @@ end
 local function ProcessAuraUpdate(unit, updateInfo)
     if updateInfo.isFullUpdate then
         CacheClearUnit(unit)
+        -- En isFullUpdate (zone change, login, /reload mid-buff) no llega
+        -- removedAuraInstanceIDs — clear cdmData del unit para que entries stale
+        -- no sobrevivan. ScanCdmViewers + CaptureCdmFrameState repopulan las
+        -- entries que sigan vivas en los frames de Blizzard en el siguiente tick.
+        cdmData[unit] = nil
         if AuraUtil and AuraUtil.ForEachAura then
             local idSet, nameSet = GetTrackedSets()
             local function visit(auraData)
@@ -496,13 +513,15 @@ end
 local function FindAuraBySpellID(unit, spellID, filter)
     if not unit or not UnitExists(unit) then return nil end
     -- 1. CDM cache (works in combat for auras the Blizzard Cooldown Manager tracks)
-    local cdmAura, cdmInfo = FindCdmAuraData(unit, spellID)
-    if cdmAura then return cdmAura, cdmInfo end
+    local cdmAura, cdmInfo, cdmInstanceID = FindCdmAuraData(unit, spellID)
+    if cdmAura then return cdmAura, cdmInfo, cdmInstanceID end
     -- Propaga el cdmInfo "restricted" (aura visible en CDM pero invisible al
     -- addon via GetAuraDataByAuraInstanceID). Si ninguno de los paths siguientes
     -- consigue auraData, lo devolvemos al caller para que sintetice ACTIVE con
-    -- stacks + appliedAt capturados desde el frame de Blizzard.
+    -- stacks + appliedAt capturados desde el frame de Blizzard. El instanceID
+    -- viaja con el info para que el caller pueda evictar entries stale.
     local restrictedCdmInfo = cdmInfo
+    local restrictedCdmInstanceID = cdmInstanceID
     -- 2. Our event-driven cache
     local cachedID = GetCachedAuraInstanceID(unit, spellID)
     if cachedID and C_UnitAuras.GetAuraDataByAuraInstanceID then
@@ -580,7 +599,7 @@ local function FindAuraBySpellID(unit, spellID, filter)
     -- para este spellID (el viewer de Blizzard sigue mostrando la aura, pero el
     -- API esta bloqueado para addons), devolvemos `nil, info` para que
     -- GetAuraStatus pueda sintetizar ACTIVE con stacks + appliedAt.
-    if restrictedCdmInfo then return nil, restrictedCdmInfo end
+    if restrictedCdmInfo then return nil, restrictedCdmInfo, restrictedCdmInstanceID end
     return nil
 end
 
@@ -1230,7 +1249,7 @@ function ns:GetAuraStatus(spellID, unit, filter, manualDuration)
 
     if not UnitExists(unit) then return result end
 
-    local auraData, cdmInfo = FindAuraBySpellID(unit, spellID, filter)
+    local auraData, cdmInfo, cdmInstanceID = FindAuraBySpellID(unit, spellID, filter)
     if auraData then
         result.status = "ACTIVE"
         -- Stacks: para auras "fully restricted" (Mana Tea, etc.) auraData.applications
@@ -1316,32 +1335,92 @@ function ns:GetAuraStatus(spellID, unit, filter, manualDuration)
             -- Duration: manualDuration > knownDuration > 0. Sin duration el icono
             -- se muestra pero sin contador de tiempo (que es exactamente como CDM
             -- pinta auras stacking sin timer fijo, e.g. Mana Tea).
-            result.status = "ACTIVE"
-            result.stacks = cdmInfo.stacks or 0
+            --
+            -- Sanity check de expiracion: si conocemos la duracion y appliedAt + dur
+            -- ya paso, la entry CDM esta stale — UNIT_AURA removedAuraInstanceIDs
+            -- nunca disparo (pasa al recargar mid-buff, zone change con isFullUpdate
+            -- sin removed list, o cuando Blizzard no notifica el aura drop). Sin esto
+            -- el ring queda pintado indefinidamente (e.g. Barkskin 12s mostrado como
+            -- ACTIVE 6 minutos despues del cast).
             local dur = (manualDuration and manualDuration > 0) and manualDuration or knownAuraDurations[spellID]
-            if dur and dur > 0 and cdmInfo.appliedAt then
-                result.duration = dur
-                local rem = (cdmInfo.appliedAt + dur) - GetTime()
-                if rem > 0 then result.remaining = rem end
-                result.expirationTime = cdmInfo.appliedAt + dur
+            local expired = dur and dur > 0 and cdmInfo.appliedAt
+                            and (cdmInfo.appliedAt + dur) <= GetTime()
+            if expired then
+                EvictCdmEntry(unit, cdmInstanceID)
+                -- status queda MISSING — el ring se apaga.
+            else
+                result.status = "ACTIVE"
+                result.stacks = cdmInfo.stacks or 0
+                if dur and dur > 0 and cdmInfo.appliedAt then
+                    result.duration = dur
+                    local rem = (cdmInfo.appliedAt + dur) - GetTime()
+                    if rem > 0 then result.remaining = rem end
+                    result.expirationTime = cdmInfo.appliedAt + dur
+                end
+            end
+        end
+    end
+
+    -- Simulated aura OVERRIDE: el modulo SimulatedAuras mantiene state propio
+    -- (stacks + duration) impulsado por UNIT_SPELLCAST_SUCCEEDED o /hnzsim. Si
+    -- el spellID esta configurado COMO simulado y el state esta activo, pisamos
+    -- cualquier deteccion previa (real aura, CLEU, cdmInfo). Razon: configurar
+    -- un preset simulado es una decision explicita del user — "trate este spell
+    -- como simulado". El CDM frame podria reportar ACTIVE con stacks=0 (binary
+    -- buff sin Count widget) y eso oculta los stacks reales del state simulado.
+    -- Solo aplica al player — los entries son por-self, no broadcast.
+    if unit == "player" and ns.GetSimulatedAuraStatus then
+        local sim = ns:GetSimulatedAuraStatus(spellID)
+        if sim then
+            result.status = "ACTIVE"
+            result.stacks = sim.stacks or 0
+            result.duration = sim.duration or 0
+            result.remaining = sim.remaining or 0
+            if sim.expirationTime then result.expirationTime = sim.expirationTime end
+            -- Flag para que los displays (CursorDisplay/RingDisplay) bajen el
+            -- threshold de "mostrar contador" a >= 1. En auras simuladas el user
+            -- siempre quiere ver cuantas cargas quedan, incluso con 1 sola.
+            result.isSimulated = true
+            -- Cuando el state simulado esta activo, FORZAMOS el iconID del
+            -- preset. C_Spell.GetSpellInfo a veces devuelve fileIDs invalidos
+            -- en clientes con data lazy-loaded (rectangulos verdes/magentas),
+            -- y el preset trae un iconID curado/probado. Antes solo overrideaba
+            -- si icon era nil/0/134400 pero eso dejaba pasar fileIDs validos-
+            -- pero-rotos como 5927655 → rectangulo en el display.
+            if ns.GetSimulatedAuraIconID then
+                local presetIcon = ns:GetSimulatedAuraIconID(spellID)
+                if presetIcon then result.icon = presetIcon end
             end
         end
     end
 
     -- Manual trigger fallback: ultima oportunidad para auras "fully restricted"
     -- en Midnight (item buffs, efectos secret) que ningun path detecta. Si el
-    -- usuario configuro un trigger spell/item en el editor y manualDuration > 0,
-    -- usamos el timestamp del ultimo cast/uso del trigger para sintetizar el
-    -- estado ACTIVE. Solo entra cuando MISSING (no pisa una deteccion real).
-    if result.status == "MISSING" and manualDuration and manualDuration > 0 then
-        local since = GetManualTriggerSince(unit, spellID)
-        if since then
-            local elapsed = GetTime() - since
-            if elapsed >= 0 and elapsed < manualDuration then
-                result.status = "ACTIVE"
-                result.duration = manualDuration
-                result.remaining = manualDuration - elapsed
-                result.expirationTime = since + manualDuration
+    -- usuario configuro un trigger spell/item en el editor, usamos el timestamp
+    -- del ultimo cast/uso del trigger para sintetizar el estado ACTIVE. Solo
+    -- entra cuando MISSING (no pisa una deteccion real).
+    --
+    -- Duration source priority:
+    --   1. manualDuration (user-configured en el editor)
+    --   2. knownAuraDurations[spellID] (aprendido en un cast OOC previo; persiste
+    --      en SavedVariables). Cubre auras que SON publicas OOC pero se vuelven
+    --      fully-restricted en combate (e.g. Diluvio/Downpour Resto Shaman): la
+    --      primera vez que el usuario las castea fuera de combate aprendemos la
+    --      duracion, y de ahi en adelante el manual trigger las sintetiza correctamente
+    --      en combate sin que el usuario tenga que setear manualDuration a mano.
+    if result.status == "MISSING" then
+        local effectiveDuration = (manualDuration and manualDuration > 0) and manualDuration
+            or knownAuraDurations[spellID]
+        if effectiveDuration and effectiveDuration > 0 then
+            local since = GetManualTriggerSince(unit, spellID)
+            if since then
+                local elapsed = GetTime() - since
+                if elapsed >= 0 and elapsed < effectiveDuration then
+                    result.status = "ACTIVE"
+                    result.duration = effectiveDuration
+                    result.remaining = effectiveDuration - elapsed
+                    result.expirationTime = since + effectiveDuration
+                end
             end
         end
     end

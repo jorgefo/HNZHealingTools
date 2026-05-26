@@ -83,7 +83,7 @@ local function UpdateIconAppearance(iconFrame, data, entry)
     local globalAlpha = ns.db.cursorDisplay.opacity or 1
     local alpha = (entry and entry.opacity and entry.opacity > 0) and entry.opacity or globalAlpha
     iconFrame:SetAlpha(alpha)
-    iconFrame.icon:SetTexture(data.icon)
+    iconFrame.icon:SetTexture(ns.GetEntryIcon(entry, data.icon))
 
     local desat = (data.status=="UNUSABLE" or data.status=="MISSING" or data.status=="NO_POWER")
     iconFrame.icon:SetDesaturated(desat)
@@ -124,7 +124,13 @@ local function UpdateIconAppearance(iconFrame, data, entry)
         elseif data.remaining and data.remaining > 0 then
             iconFrame.text:SetText(ns.FormatDuration(data.remaining))
         end
-        if data.stacks and data.stacks > 1 then
+        -- Threshold de visibilidad del contador: en auras reales solo mostramos
+        -- si stacks > 1 (un buff binario con applications=1 no necesita "1"
+        -- pintado). En auras simuladas bajamos a >= 1: el user explicitamente
+        -- configuro el spell para tracker cargas, asi que querer ver "1" al
+        -- final del consumo es esperable.
+        local stackMin = data.isSimulated and 1 or 2
+        if data.stacks and data.stacks >= stackMin then
             iconFrame.chargeText:SetText(data.stacks); iconFrame.chargeText:Show()
         end
     end

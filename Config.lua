@@ -2,7 +2,6 @@ local addonName, ns = ...
 
 function ns:InitConfig()
     SLASH_HNZHEALINGTOOLS1 = "/hht"
-    SLASH_HNZHEALINGTOOLS2 = "/hnz"
     SlashCmdList["HNZHEALINGTOOLS"] = function(msg)
         local cmd, rest = msg:match("^(%S+)%s*(.*)$")
         cmd = cmd and cmd:lower() or ""
@@ -539,6 +538,53 @@ local function InfoHint(parent, tooltipText)
         GameTooltip:Show()
     end)
     f:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    return f
+end
+
+-- Widget compartido: checkbox "Custom icon" + EditBox (file ID numerico) +
+-- preview live. Cuando esta checked y el ID es valido (>0), se persiste como
+-- entry.customIconID; en cualquier otro caso queda nil = usar el icono natural
+-- del spell/aura. ns.GetEntryIcon resuelve la prioridad en los displays.
+local function CustomIconField(parent)
+    local f = CreateFrame("Frame", nil, parent)
+    f:SetSize(380, 24)
+
+    local ck = CreateFrame("CheckButton", nil, f, "UICheckButtonTemplate")
+    ck:SetSize(18, 18); ck:SetPoint("LEFT", 2, 0); SkinCheck(ck)
+    local lbl = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    lbl:SetPoint("LEFT", ck, "RIGHT", 6, 0); lbl:SetText(ns.L["Custom icon (file ID):"])
+    lbl:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+    local eb = EditBox(f, 90); eb:SetPoint("LEFT", lbl, "RIGHT", 6, 0); eb:SetNumeric(true)
+    local prev = f:CreateTexture(nil, "ARTWORK"); prev:SetSize(22, 22); prev:SetPoint("LEFT", eb, "RIGHT", 8, 0)
+    prev:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+    local hint = InfoHint(f, ns.L["Enter a texture file ID (e.g. 132159). Find IDs on Wowhead — most spell pages link to the icon's file ID. Leave unchecked to use the spell's default icon."])
+    hint:SetPoint("LEFT", prev, "RIGHT", 6, 0)
+
+    local function RefreshPreview()
+        local id = tonumber(eb:GetText())
+        if ck:GetChecked() and id and id > 0 then
+            prev:SetTexture(id); prev:Show()
+        else
+            prev:SetTexture(nil); prev:Hide()
+        end
+    end
+    eb:HookScript("OnTextChanged", RefreshPreview)
+    ck:HookScript("OnClick", RefreshPreview)
+
+    function f:GetIconID()
+        if not ck:GetChecked() then return nil end
+        local id = tonumber(eb:GetText())
+        return (id and id > 0) and id or nil
+    end
+    function f:SetIconID(id)
+        local n = tonumber(id)
+        if n and n > 0 then
+            ck:SetChecked(true); eb:SetText(tostring(n))
+        else
+            ck:SetChecked(false); eb:SetText("")
+        end
+        RefreshPreview()
+    end
     return f
 end
 
@@ -1238,6 +1284,44 @@ local function AddRowTestButton(row, anchorRight, onTest)
     return b
 end
 
+-- Boton "?" diagnostico por-row. Dispara el mismo path que /hht auradebug o
+-- /hht debug, pero con los args ya rellenos desde la entry (spellID, unit,
+-- filter). Devuelve nil si la entry no tiene spellID (items) — el caller debe
+-- caer al anchorRight original cuando esto pasa.
+--
+--   kind = "aura"  -> ns:DebugAura("<spellID> <unit> <filter>")
+--   kind = "spell" -> ns:DebugSpell(tostring(spellID))
+local function AddRowDebugButton(row, anchorRight, entry, kind)
+    if not (entry and entry.spellID) then return nil end
+    local b = CreateFrame("Button", nil, row); b:SetSize(16, 20)
+    b:SetPoint("RIGHT", anchorRight, "LEFT", -2, 0)
+    local t = b:CreateFontString(nil, "OVERLAY", "GameFontNormal"); t:SetAllPoints(); t:SetText("?")
+    t:SetTextColor(0.55, 0.85, 1.0, 1)
+    local h = b:CreateTexture(nil, "HIGHLIGHT"); h:SetAllPoints(); h:SetColorTexture(0.3, 0.6, 1.0, 0.25)
+    b:SetScript("OnEnter", function(s)
+        GameTooltip:SetOwner(s, "ANCHOR_RIGHT")
+        GameTooltip:AddLine(ns.L["Debug"] or "Debug")
+        local hint
+        if kind == "aura" then
+            hint = ns.L["Print aura detection diagnostics to chat"] or "Print aura detection diagnostics to chat"
+        else
+            hint = ns.L["Print spell cooldown diagnostics to chat"] or "Print spell cooldown diagnostics to chat"
+        end
+        GameTooltip:AddLine(hint, 1, 1, 1, true)
+        GameTooltip:Show()
+    end)
+    b:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    b:SetScript("OnClick", function()
+        if kind == "aura" and ns.DebugAura then
+            local args = string.format("%d %s %s", entry.spellID, entry.unit or "player", entry.filter or "HELPFUL")
+            ns:DebugAura(args)
+        elseif kind == "spell" and ns.DebugSpell then
+            ns:DebugSpell(tostring(entry.spellID))
+        end
+    end)
+    return b
+end
+
 local function SpellRow(parent, entry, index, listLen, onRemove, onEdit, onMoveUp, onMoveDown)
     local r=CreateFrame("Frame",nil,parent,"BackdropTemplate"); r:SetSize(parent:GetWidth()-6,34)
     r:SetBackdrop({bgFile="Interface\\Tooltips\\UI-Tooltip-Background",edgeFile="Interface\\Tooltips\\UI-Tooltip-Border",tile=true,tileSize=16,edgeSize=12,insets={left=2,right=2,top=2,bottom=2}})
@@ -1254,6 +1338,7 @@ local function SpellRow(parent, entry, index, listLen, onRemove, onEdit, onMoveU
         nm, ic = ns.GetSpellDisplayInfo(entry.spellID)
         if nm == tostring(entry.spellID) then nm = ns.L["Unknown"] end
     end
+    ic = ns.GetEntryIcon(entry, ic)
     local icon=r:CreateTexture(nil,"ARTWORK"); icon:SetSize(24,24); icon:SetPoint("LEFT",5,0); icon:SetTexture(ic); icon:SetTexCoord(0.08,0.92,0.08,0.92)
     local ck=CreateFrame("CheckButton",nil,r,"UICheckButtonTemplate"); ck:SetSize(18,18); ck:SetPoint("LEFT",icon,"RIGHT",6,0); ck:SetChecked(entry.enabled)
     SkinCheck(ck)
@@ -1284,7 +1369,7 @@ local function SpellRow(parent, entry, index, listLen, onRemove, onEdit, onMoveU
     else
         dt=dt.."|cff666666"..ns.L["ID:"]..entry.spellID.."|r"
     end
-    local dtx=r:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall"); dtx:SetPoint("LEFT",nt,"RIGHT",6,0); dtx:SetPoint("RIGHT",-86,0); dtx:SetJustifyH("LEFT"); dtx:SetWordWrap(false); dtx:SetText(dt)
+    local dtx=r:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall"); dtx:SetPoint("LEFT",nt,"RIGHT",6,0); dtx:SetPoint("RIGHT",-104,0); dtx:SetJustifyH("LEFT"); dtx:SetWordWrap(false); dtx:SetText(dt)
     local rb=CreateFrame("Button",nil,r); rb:SetSize(20,20); rb:SetPoint("RIGHT",-5,0)
     local rt=rb:CreateFontString(nil,"OVERLAY","GameFontRed"); rt:SetAllPoints(); rt:SetText("X")
     local rh=rb:CreateTexture(nil,"HIGHLIGHT"); rh:SetAllPoints(); rh:SetColorTexture(0.8,0.2,0.2,0.3)
@@ -1300,7 +1385,8 @@ local function SpellRow(parent, entry, index, listLen, onRemove, onEdit, onMoveU
     eb:SetScript("OnEnter",function(s) GameTooltip:SetOwner(s,"ANCHOR_RIGHT"); GameTooltip:AddLine(ns.L["Edit"]); GameTooltip:Show() end)
     eb:SetScript("OnLeave",function() GameTooltip:Hide() end)
     eb:SetScript("OnClick",function() if onEdit then onEdit(entry) end end)
-    AddRowMoveButtons(r, eb, onMoveUp, onMoveDown, index and index > 1, index and listLen and index < listLen)
+    local moveAnchor = AddRowDebugButton(r, eb, entry, "spell") or eb
+    AddRowMoveButtons(r, moveAnchor, onMoveUp, onMoveDown, index and index > 1, index and listLen and index < listLen)
     return r
 end
 
@@ -1310,6 +1396,7 @@ local function CursorAuraRow(parent, entry, index, listLen, onRemove, onEdit, on
     r:SetBackdropColor(0.1,0.1,0.15,0.7); r:SetBackdropBorderColor(0.4,0.4,0.5,0.6)
     local nm, ic = ns.GetSpellDisplayInfo(entry.spellID)
     if nm == tostring(entry.spellID) then nm = ns.L["Unknown"] end
+    ic = ns.GetEntryIcon(entry, ic)
     local notInCDM = not ns:IsAuraInCDM(entry.spellID)
     local icon=r:CreateTexture(nil,"ARTWORK"); icon:SetSize(24,24); icon:SetPoint("LEFT",5,0); icon:SetTexture(ic); icon:SetTexCoord(0.08,0.92,0.08,0.92)
     if notInCDM then icon:SetDesaturated(true) end
@@ -1328,7 +1415,7 @@ local function CursorAuraRow(parent, entry, index, listLen, onRemove, onEdit, on
     if entry.requiredTalentSpellID then dt=dt.." |cffcc88ff"..ns.L["Talent"].."|r" end
     do local b=FormatInstanceBadge(entry.instanceTypes); if b then dt=dt.." "..b end end
     if notInCDM then dt=dt.." |cffaaaaaa"..ns.L["!CDM"].."|r" end
-    local dtx=r:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall"); dtx:SetPoint("LEFT",nt,"RIGHT",6,0); dtx:SetPoint("RIGHT",-86,0); dtx:SetJustifyH("LEFT"); dtx:SetWordWrap(false); dtx:SetText(dt)
+    local dtx=r:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall"); dtx:SetPoint("LEFT",nt,"RIGHT",6,0); dtx:SetPoint("RIGHT",-104,0); dtx:SetJustifyH("LEFT"); dtx:SetWordWrap(false); dtx:SetText(dt)
     local rb=CreateFrame("Button",nil,r); rb:SetSize(20,20); rb:SetPoint("RIGHT",-5,0)
     local rt=rb:CreateFontString(nil,"OVERLAY","GameFontRed"); rt:SetAllPoints(); rt:SetText("X")
     local rh=rb:CreateTexture(nil,"HIGHLIGHT"); rh:SetAllPoints(); rh:SetColorTexture(0.8,0.2,0.2,0.3)
@@ -1341,7 +1428,8 @@ local function CursorAuraRow(parent, entry, index, listLen, onRemove, onEdit, on
     eb:SetScript("OnEnter",function(s) GameTooltip:SetOwner(s,"ANCHOR_RIGHT"); GameTooltip:AddLine(ns.L["Edit"]); GameTooltip:Show() end)
     eb:SetScript("OnLeave",function() GameTooltip:Hide() end)
     eb:SetScript("OnClick",function() if onEdit then onEdit(entry) end end)
-    AddRowMoveButtons(r, eb, onMoveUp, onMoveDown, index and index > 1, index and listLen and index < listLen)
+    local moveAnchor = AddRowDebugButton(r, eb, entry, "aura") or eb
+    AddRowMoveButtons(r, moveAnchor, onMoveUp, onMoveDown, index and index > 1, index and listLen and index < listLen)
     return r
 end
 
@@ -1351,6 +1439,7 @@ local function RingAuraRow(parent, entry, index, onRemove, onEdit, onTest)
     r:SetBackdropColor(0.1,0.1,0.15,0.7); r:SetBackdropBorderColor(0.4,0.4,0.5,0.6)
     local nm, ic = ns.GetSpellDisplayInfo(entry.spellID)
     if nm == tostring(entry.spellID) then nm = ns.L["Unknown"] end
+    ic = ns.GetEntryIcon(entry, ic)
     local notInCDM = not ns:IsAuraInCDM(entry.spellID)
     local nt2=r:CreateFontString(nil,"OVERLAY","GameFontNormal"); nt2:SetPoint("LEFT",6,0); nt2:SetText("|cff888888#"..index.."|r")
     local sw=ColorSwatch(r,entry.color,function() ns:MarkAuraDirty() end); sw:SetSize(22,22); sw:SetPoint("LEFT",nt2,"RIGHT",5,0)
@@ -1369,7 +1458,7 @@ local function RingAuraRow(parent, entry, index, onRemove, onEdit, onTest)
     do local b=FormatInstanceBadge(entry.instanceTypes); if b then ds=ds.." "..b end end
     if notInCDM then ds=ds.." |cffaaaaaa"..ns.L["!CDM"].."|r" end
     ds=ds.." |cff666666"..ns.L["ID:"]..entry.spellID.."|r"
-    local dtx=r:CreateFontString(nil,"OVERLAY","GameFontNormal"); dtx:SetPoint("LEFT",nt,"RIGHT",6,0); dtx:SetPoint("RIGHT",-78,0); dtx:SetJustifyH("LEFT"); dtx:SetWordWrap(false); dtx:SetText(ds)
+    local dtx=r:CreateFontString(nil,"OVERLAY","GameFontNormal"); dtx:SetPoint("LEFT",nt,"RIGHT",6,0); dtx:SetPoint("RIGHT",-96,0); dtx:SetJustifyH("LEFT"); dtx:SetWordWrap(false); dtx:SetText(ds)
     local rb=CreateFrame("Button",nil,r); rb:SetSize(22,22); rb:SetPoint("RIGHT",-6,0)
     local rt=rb:CreateFontString(nil,"OVERLAY","GameFontRed"); rt:SetAllPoints(); rt:SetText("X")
     local rhl=rb:CreateTexture(nil,"HIGHLIGHT"); rhl:SetAllPoints(); rhl:SetColorTexture(0.8,0.2,0.2,0.3)
@@ -1382,7 +1471,9 @@ local function RingAuraRow(parent, entry, index, onRemove, onEdit, onTest)
     eb:SetScript("OnEnter",function(s) GameTooltip:SetOwner(s,"ANCHOR_RIGHT"); GameTooltip:AddLine(ns.L["Edit"]); GameTooltip:Show() end)
     eb:SetScript("OnLeave",function() GameTooltip:Hide() end)
     eb:SetScript("OnClick",function() if onEdit then onEdit(entry) end end)
-    if onTest then AddRowTestButton(r, eb, onTest) end
+    local rightAnchor = eb
+    if onTest then rightAnchor = AddRowTestButton(r, eb, onTest) end
+    AddRowDebugButton(r, rightAnchor, entry, "aura")
     return r
 end
 
@@ -1561,6 +1652,7 @@ local function CreateCursorSpellEditor()
     local hsoLabel=t2:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); hsoLabel:SetPoint("LEFT",hsoCk,"RIGHT",6,0); hsoLabel:SetText(ns.L["Hide status overlay"]); hsoLabel:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
     local htCk=CreateFrame("CheckButton",nil,t2,"UICheckButtonTemplate"); htCk:SetSize(18,18); htCk:SetPoint("TOPLEFT",2,-288); SkinCheck(htCk)
     local htLabel=t2:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); htLabel:SetPoint("LEFT",htCk,"RIGHT",6,0); htLabel:SetText(ns.L["Hide cooldown / duration timer"]); htLabel:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+    local iconF=CustomIconField(t2); iconF:SetPoint("TOPLEFT",2,-316)
 
     -- ============ Tab 3: Effects ============
     local cpCk=CreateFrame("CheckButton",nil,t3,"UICheckButtonTemplate"); cpCk:SetSize(18,18); cpCk:SetPoint("TOPLEFT",2,-4); SkinCheck(cpCk)
@@ -1601,6 +1693,7 @@ local function CreateCursorSpellEditor()
         e.specs=spChk:GetSpecs()
         e.requiredTalentSpellID=tlPick:GetSpellID()
         e.instanceTypes=itChk:GetTypes()
+        e.customIconID=iconF:GetIconID()
     end
 
     saveBtn:SetScript("OnClick",function()
@@ -1632,6 +1725,7 @@ local function CreateCursorSpellEditor()
         cpCkPos:SetChecked(false)
         draft.iconSize=0; draft.opacity=0; draft.offsetX=0; draft.offsetY=0
         RefreshSliders()
+        iconF:SetIconID(nil)
     end
 
     local editor={}
@@ -1662,6 +1756,7 @@ local function CreateCursorSpellEditor()
         RefreshSliders()
         spChk:SetSpecs(entry.specs); tlPick:SetSpellID(entry.requiredTalentSpellID)
         itChk:SetTypes(entry.instanceTypes)
+        iconF:SetIconID(entry.customIconID)
         f.title:SetText("|cff00ccff"..ns.L["Editing: "]..(info and info.name or "?").."|r")
         saveBtn:SetText(ns.L["Update"]); f:Show()
     end
@@ -1758,6 +1853,7 @@ local function CreateCursorAuraEditor()
     local hsoLabel=t2:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); hsoLabel:SetPoint("LEFT",hsoCk,"RIGHT",6,0); hsoLabel:SetText(ns.L["Hide status overlay"]); hsoLabel:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
     local htCk=CreateFrame("CheckButton",nil,t2,"UICheckButtonTemplate"); htCk:SetSize(18,18); htCk:SetPoint("TOPLEFT",2,-264); SkinCheck(htCk)
     local htLabel=t2:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); htLabel:SetPoint("LEFT",htCk,"RIGHT",6,0); htLabel:SetText(ns.L["Hide timer"]); htLabel:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+    local iconF=CustomIconField(t2); iconF:SetPoint("TOPLEFT",2,-292)
 
     -- ============ Tab 3: Effects ============
     local cpCk=CreateFrame("CheckButton",nil,t3,"UICheckButtonTemplate"); cpCk:SetSize(18,18); cpCk:SetPoint("TOPLEFT",2,-4); SkinCheck(cpCk)
@@ -1794,6 +1890,7 @@ local function CreateCursorAuraEditor()
         e.offsetY=draft.offsetY
         e.specs=spChk:GetSpecs(); e.requiredTalentSpellID=tlPick:GetSpellID()
         e.instanceTypes=itChk:GetTypes()
+        e.customIconID=iconF:GetIconID()
         -- Manual triggers: 0/empty se persiste como nil (semantica "sin trigger")
         -- para que GetTrackedSets/FireManualTriggerByID puedan saltearse rapido.
         local ts = tonumber(tse:GetText()) or 0; e.manualTriggerSpellID = (ts > 0) and ts or nil
@@ -1832,6 +1929,7 @@ local function CreateCursorAuraEditor()
         cpCkPos:SetChecked(false)
         draft.iconSize=0; draft.opacity=0; draft.offsetX=0; draft.offsetY=0
         RefreshSliders()
+        iconF:SetIconID(nil)
     end
 
     local editor={}
@@ -1867,6 +1965,7 @@ local function CreateCursorAuraEditor()
         RefreshSliders()
         spChk:SetSpecs(entry.specs); tlPick:SetSpellID(entry.requiredTalentSpellID)
         itChk:SetTypes(entry.instanceTypes)
+        iconF:SetIconID(entry.customIconID)
         f.title:SetText(ns.L["Editing: "]..(info and info.name or "?"))
         saveBtn:SetText(ns.L["Update"]); f:Show()
     end
@@ -1942,6 +2041,8 @@ local function CreateRingAuraEditor()
     local sndTest=Btn(t2,ns.L["Test"],60,18); sndTest:SetPoint("LEFT",sndPick,"RIGHT",6,0)
     sndTest:SetScript("OnClick",function() ns.PlayAuraSound(sndPick:GetSoundName()) end)
 
+    local iconF=CustomIconField(t2); iconF:SetPoint("TOPLEFT",2,-60)
+
     local fb=p:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall"); fb:SetPoint("BOTTOMLEFT",4,4); fb:SetPoint("BOTTOMRIGHT",-4,4); fb:SetJustifyH("LEFT")
     local saveBtn=Btn(f,ns.L["Save"],100,26); saveBtn:SetPoint("BOTTOMRIGHT",-110,8)
     local cancelBtn=Btn(f,ns.L["Cancel"],90,26); cancelBtn:SetPoint("BOTTOMRIGHT",-8,8)
@@ -1959,6 +2060,7 @@ local function CreateRingAuraEditor()
         e.color={r=pc.r,g=pc.g,b=pc.b,a=pc.a}
         e.specs=spChk:GetSpecs(); e.requiredTalentSpellID=tlPick:GetSpellID()
         e.instanceTypes=itChk:GetTypes()
+        e.customIconID=iconF:GetIconID()
         local ts = tonumber(tse:GetText()) or 0; e.manualTriggerSpellID = (ts > 0) and ts or nil
         local ti = tonumber(tie:GetText()) or 0; e.manualTriggerItemID  = (ti > 0) and ti or nil
         local tk = (tke:GetText() or ""):trim(); e.triggerKey = (tk ~= "") and tk or nil
@@ -1989,6 +2091,7 @@ local function CreateRingAuraEditor()
                     added.manualTriggerItemID  = (ti > 0) and ti or nil
                     local tk = (tke:GetText() or ""):trim()
                     added.triggerKey = (tk ~= "") and tk or nil
+                    added.customIconID = iconF:GetIconID()
                 end
             end
             ns:RebuildRingDisplay()
@@ -2004,6 +2107,7 @@ local function CreateRingAuraEditor()
         tse:SetText("0"); tie:SetText("0"); tke:SetText("")
         cpCk:SetChecked(false); sndCk:SetChecked(false); sndPick:SetSoundName("Default")
         spChk:SetSpecs(nil); tlPick:SetSpellID(nil); itChk:SetTypes(nil); fb:SetText("")
+        iconF:SetIconID(nil)
         if useNextColor then
             local nc=ns:GetNextRingColor()
             pc.r,pc.g,pc.b,pc.a=nc.r,nc.g,nc.b,nc.a; cs:UpdateColor()
@@ -2033,6 +2137,7 @@ local function CreateRingAuraEditor()
         if entry.color then pc.r=entry.color.r; pc.g=entry.color.g; pc.b=entry.color.b; pc.a=entry.color.a; cs:UpdateColor() end
         spChk:SetSpecs(entry.specs); tlPick:SetSpellID(entry.requiredTalentSpellID)
         itChk:SetTypes(entry.instanceTypes)
+        iconF:SetIconID(entry.customIconID)
         f.title:SetText(ns.L["Editing: "]..(info and info.name or "?"))
         saveBtn:SetText(ns.L["Update"]); f:Show()
     end
@@ -2078,6 +2183,7 @@ local function CreatePulseSpellEditor()
     local tkHint=InfoHint(t1, ns.L["Optional. Fire this pulse from a macro: /hht trigger <key>. Case-insensitive."]); tkHint:SetPoint("LEFT",tke,"RIGHT",6,0)
     local itLabel=t1:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); itLabel:SetPoint("TOPLEFT",4,-90); itLabel:SetText(ns.L["Show only in:"])
     local itChk=InstanceTypeChecklist(t1); itChk:SetPoint("TOPLEFT",4,-106)
+    local iconF=CustomIconField(t1); iconF:SetPoint("TOPLEFT",2,-150)
 
     -- ============ Tab 2: Sound ============
     local sndCk=CreateFrame("CheckButton",nil,t2,"UICheckButtonTemplate"); sndCk:SetSize(18,18); sndCk:SetPoint("TOPLEFT",2,-4); SkinCheck(sndCk)
@@ -2091,6 +2197,7 @@ local function CreatePulseSpellEditor()
     testBtn:SetScript("OnClick",function()
         local sid = ns.GetResolvedSpellID(eb)
         local nm, ic = ns.GetSpellDisplayInfo(sid)
+        ic = ns.GetEntryIcon({customIconID=iconF:GetIconID()}, ic)
         ns:ShowPulse(ic, nm, sndCk:GetChecked() and true or false, sndPick:GetSoundName(), chDD:GetValue())
     end)
 
@@ -2105,6 +2212,7 @@ local function CreatePulseSpellEditor()
         e.soundName=sndPick:GetSoundName() or "Default"
         e.soundChannel=chDD:GetValue() or "Master"
         e.instanceTypes=itChk:GetTypes()
+        e.customIconID=iconF:GetIconID()
         local tk = (tke:GetText() or ""):trim(); e.triggerKey = (tk ~= "") and tk or nil
     end
 
@@ -2131,6 +2239,7 @@ local function CreatePulseSpellEditor()
         editingEntry=nil; eb:SetText(""); eb:Enable()
         sndCk:SetChecked(false); sndPick:SetSoundName("Default")
         chDD:SetValue("Master"); itChk:SetTypes(nil); tke:SetText(""); fb:SetText("")
+        iconF:SetIconID(nil)
     end
 
     local editor={}
@@ -2148,6 +2257,7 @@ local function CreatePulseSpellEditor()
         chDD:SetValue(entry.soundChannel or "Master")
         itChk:SetTypes(entry.instanceTypes)
         tke:SetText(tostring(entry.triggerKey or ""))
+        iconF:SetIconID(entry.customIconID)
         f.title:SetText("|cff00ccff"..ns.L["Edit Pulse Spell"].."|r"); saveBtn:SetText(ns.L["Save"]); f:Show()
     end
     return editor
@@ -2178,6 +2288,7 @@ local function CreatePulseAuraEditor()
 
     local itLabel=t1:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); itLabel:SetPoint("TOPLEFT",4,-126); itLabel:SetText(ns.L["Show only in:"])
     local itChk=InstanceTypeChecklist(t1); itChk:SetPoint("TOPLEFT",4,-142)
+    local iconF=CustomIconField(t1); iconF:SetPoint("TOPLEFT",2,-186)
 
     -- ============ Tab 2: Sound ============
     local sndCk=CreateFrame("CheckButton",nil,t2,"UICheckButtonTemplate"); sndCk:SetSize(18,18); sndCk:SetPoint("TOPLEFT",2,-4); SkinCheck(sndCk)
@@ -2191,6 +2302,7 @@ local function CreatePulseAuraEditor()
     testBtn:SetScript("OnClick",function()
         local sid = ns.GetResolvedSpellID(eb)
         local nm, ic = ns.GetSpellDisplayInfo(sid)
+        ic = ns.GetEntryIcon({customIconID=iconF:GetIconID()}, ic)
         ns:ShowPulse(ic, nm, sndCk:GetChecked() and true or false, sndPick:GetSoundName(), chDD:GetValue())
     end)
 
@@ -2207,6 +2319,7 @@ local function CreatePulseAuraEditor()
         e.soundName=sndPick:GetSoundName() or "Default"
         e.soundChannel=chDD:GetValue() or "Master"
         e.instanceTypes=itChk:GetTypes()
+        e.customIconID=iconF:GetIconID()
         local tk = (tke:GetText() or ""):trim(); e.triggerKey = (tk ~= "") and tk or nil
     end
 
@@ -2232,6 +2345,7 @@ local function CreatePulseAuraEditor()
         udd:SetValue("player"); fdd:SetValue("HELPFUL")
         sndCk:SetChecked(false); sndPick:SetSoundName("Default")
         chDD:SetValue("Master"); itChk:SetTypes(nil); tke:SetText(""); fb:SetText("")
+        iconF:SetIconID(nil)
     end
 
     local editor={}
@@ -2250,6 +2364,7 @@ local function CreatePulseAuraEditor()
         chDD:SetValue(entry.soundChannel or "Master")
         itChk:SetTypes(entry.instanceTypes)
         tke:SetText(tostring(entry.triggerKey or ""))
+        iconF:SetIconID(entry.customIconID)
         f.title:SetText("|cff00ccff"..ns.L["Edit Pulse Aura"].."|r"); saveBtn:SetText(ns.L["Save"]); f:Show()
     end
     return editor
@@ -3338,7 +3453,7 @@ local pulseSpellListC, pulseAuraListC
 -- Filas Pulse simplificadas (toda la edición vive en el modal). Solo pintamos:
 -- icon + name + ID + badges + Edit + Remove. Botones idénticos al patrón de las
 -- filas Cursor/Ring: × roja para remove, engranaje teal para edit.
-local function AddRowEditRemoveButtons(row, entry, onRemove, onEdit, onTest)
+local function AddRowEditRemoveButtons(row, entry, onRemove, onEdit, onTest, debugKind)
     local rb = CreateFrame("Button", nil, row); rb:SetSize(20, 20); rb:SetPoint("RIGHT", -5, 0)
     local rt = rb:CreateFontString(nil, "OVERLAY", "GameFontRed"); rt:SetAllPoints(); rt:SetText("X")
     local rh = rb:CreateTexture(nil, "HIGHLIGHT"); rh:SetAllPoints(); rh:SetColorTexture(0.8, 0.2, 0.2, 0.3)
@@ -3359,7 +3474,12 @@ local function AddRowEditRemoveButtons(row, entry, onRemove, onEdit, onTest)
 
     local tb
     if onTest then tb = AddRowTestButton(row, eb, onTest) end
-    return eb, rb, tb
+    -- Debug button (?) a la izquierda del test/edit cuando el caller especifica
+    -- debugKind. Para items (sin spellID) AddRowDebugButton devuelve nil y no se
+    -- crea nada — el row queda igual que antes para entries no-spell.
+    local db
+    if debugKind then db = AddRowDebugButton(row, tb or eb, entry, debugKind) end
+    return eb, rb, tb, db
 end
 
 local function PulseSpellRow(parent, entry, onRemove, onEdit, onTest)
@@ -3372,6 +3492,7 @@ local function PulseSpellRow(parent, entry, onRemove, onEdit, onTest)
     local name, icon
     if isItem then name, icon = ns.GetItemDisplayInfo(entry.itemID)
     else name, icon = ns.GetSpellDisplayInfo(entry.spellID) end
+    icon = ns.GetEntryIcon(entry, icon)
     local ic = row:CreateTexture(nil, "ARTWORK"); ic:SetSize(24, 24); ic:SetPoint("LEFT", 4, 0)
     ic:SetTexture(icon); ic:SetTexCoord(0.08, 0.92, 0.08, 0.92)
 
@@ -3389,8 +3510,10 @@ local function PulseSpellRow(parent, entry, onRemove, onEdit, onTest)
     nm:SetText(name .. itemTag .. sndTag .. instTag .. " |cff888888(" .. idLabel .. ")|r")
     nm:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
 
-    local editBtn, _, testBtn = AddRowEditRemoveButtons(row, entry, onRemove, onEdit, onTest)
-    nm:SetPoint("RIGHT", testBtn or editBtn, "LEFT", -8, 0)
+    -- debugKind = "spell" para spell entries, nil para items (no aplica spell debug)
+    local debugKind = (not isItem) and "spell" or nil
+    local editBtn, _, testBtn, dbgBtn = AddRowEditRemoveButtons(row, entry, onRemove, onEdit, onTest, debugKind)
+    nm:SetPoint("RIGHT", dbgBtn or testBtn or editBtn, "LEFT", -8, 0)
     return row
 end
 
@@ -3401,6 +3524,7 @@ local function PulseAuraRow(parent, entry, onRemove, onEdit, onTest)
     SubPanelBackdrop(row, 0.4)
 
     local name, icon = ns.GetSpellDisplayInfo(entry.spellID)
+    icon = ns.GetEntryIcon(entry, icon)
     local ic = row:CreateTexture(nil, "ARTWORK"); ic:SetSize(24, 24); ic:SetPoint("LEFT", 4, 0)
     ic:SetTexture(icon); ic:SetTexCoord(0.08, 0.92, 0.08, 0.92)
 
@@ -3414,8 +3538,8 @@ local function PulseAuraRow(parent, entry, onRemove, onEdit, onTest)
     nm:SetText(name .. " " .. unitTag .. filterTag .. sndTag .. instTag .. " |cff888888(" .. entry.spellID .. ")|r")
     nm:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
 
-    local editBtn, _, testBtn = AddRowEditRemoveButtons(row, entry, onRemove, onEdit, onTest)
-    nm:SetPoint("RIGHT", testBtn or editBtn, "LEFT", -8, 0)
+    local editBtn, _, testBtn, dbgBtn = AddRowEditRemoveButtons(row, entry, onRemove, onEdit, onTest, "aura")
+    nm:SetPoint("RIGHT", dbgBtn or testBtn or editBtn, "LEFT", -8, 0)
     return row
 end
 
@@ -3923,6 +4047,94 @@ local function BuildMrtConfigPage(p)
         local snd = sndPick:GetSoundName() or "Default"
         if ns.PlayAuraSound then ns.PlayAuraSound(snd, ns.db.mrtTimeline.soundChannel or "Master") end
     end)
+    soundY = soundY - 36
+
+    -- ==================== Voice (TTS) ====================
+    -- C_VoiceChat.SpeakText anuncia el nombre del hechizo X segundos antes del
+    -- trigger. Independiente del Sound on trigger (que dispara AL trigger). El
+    -- lead time del TTS suele ser menor (1s default) para que coincida con el
+    -- momento en que tenes que apretar la tecla.
+    local sh3 = SubH(p, ns.L["Voice (TTS)"]); sh3:SetPoint("TOPLEFT", C1, soundY); soundY = soundY - 22
+
+    local ttsCk = CreateCheckbox(p, ns.L["Announce spell name by voice"],
+        function() return ns.db.mrtTimeline.ttsEnabled end,
+        function(v) ns.db.mrtTimeline.ttsEnabled = v end)
+    ttsCk:SetPoint("TOPLEFT", C1, soundY); table.insert(allCheckboxes, ttsCk)
+    soundY = soundY - 30
+
+    -- Language picker: controla la carpeta de WAVs pre-grabados (esES/enUS)
+    -- Y la voz TTS de fallback. "auto" usa GetLocale (esES/esMX→esES, resto→enUS).
+    -- Cambiar de Auto a English en cliente esMX hace que digan "Heroism" en
+    -- vez de "Heroismo" — util para healers que prefieren spell names en
+    -- ingles (como suelen aparecer en notas MRT).
+    local langLabel = p:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    langLabel:SetPoint("TOPLEFT", C1, soundY); langLabel:SetText(ns.L["Language:"])
+    langLabel:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+
+    local langItems = {
+        { label = ns.L["Auto (client locale)"] or "Auto (client locale)", value = "auto" },
+        { label = "Español",  value = "esES" },
+        { label = "English",  value = "enUS" },
+    }
+    local langDD = Dropdown(p, 180, langItems,
+        ns.db.mrtTimeline.ttsLanguage or "auto",
+        function(v) ns.db.mrtTimeline.ttsLanguage = v end)
+    langDD:SetPoint("LEFT", langLabel, "RIGHT", 6, 0)
+    soundY = soundY - 30
+
+    local ttsDefs = {
+        {ns.L["TTS lead time (s)"], 0, 5, 1,
+            function() return ns.db.mrtTimeline.ttsLeadTime end,
+            function(v) ns.db.mrtTimeline.ttsLeadTime = v end},
+        {ns.L["TTS volume"], 0, 100, 5,
+            function() return ns.db.mrtTimeline.ttsVolume end,
+            function(v) ns.db.mrtTimeline.ttsVolume = v end},
+    }
+    for _, d in ipairs(ttsDefs) do
+        local s = CreateSlider(p, d[1], d[2], d[3], d[4], d[5], d[6])
+        s:SetPoint("TOPLEFT", C1, soundY); table.insert(allSliders, s); soundY = soundY - 48
+    end
+
+    local ttsTestBtn = Btn(p, ns.L["Test"], 80, 22); ttsTestBtn:SetPoint("TOPLEFT", C1, soundY)
+    ttsTestBtn:SetScript("OnClick", function()
+        -- Diagnostico full: imprime cuantas voces, volumen/rate global de
+        -- C_TTSSettings (que actua como ceiling), y si voice chat esta
+        -- iniciado. Ayuda a identificar PORQUE no suena cuando los voiceIDs
+        -- existen pero la API silenciosamente no produce audio.
+        if not DEFAULT_CHAT_FRAME then return end
+        local function P(s) DEFAULT_CHAT_FRAME:AddMessage(s) end
+
+        if ns.MrtGetTtsVoices then
+            local voices = ns.MrtGetTtsVoices()
+            P(string.format("|cff66ccffHNZ TTS:|r %d voz(ces) disponibles.", #voices))
+            for i, v in ipairs(voices) do
+                if i <= 5 then
+                    P(string.format("  [%d] %s (%s)",
+                        v.voiceID or -1, tostring(v.name), tostring(v.language)))
+                end
+            end
+        end
+        if C_TTSSettings then
+            local vol = C_TTSSettings.GetSpeechVolume and C_TTSSettings.GetSpeechVolume() or "?"
+            local rate = C_TTSSettings.GetSpeechRate and C_TTSSettings.GetSpeechRate() or "?"
+            P(string.format("|cff66ccffHNZ TTS:|r C_TTSSettings vol=%s rate=%s",
+                tostring(vol), tostring(rate)))
+        else
+            P("|cffff5555HNZ TTS:|r C_TTSSettings no existe en este cliente.")
+        end
+        if C_VoiceChat then
+            local logged = C_VoiceChat.IsLoggedIn and C_VoiceChat.IsLoggedIn()
+            P("|cff66ccffHNZ TTS:|r VoiceChat logged in = " .. tostring(logged))
+        end
+        P(string.format("|cff66ccffHNZ TTS:|r config voiceID=%s vol=%s rate=%s",
+            tostring(ns.db.mrtTimeline.ttsVoiceID),
+            tostring(ns.db.mrtTimeline.ttsVolume),
+            tostring(ns.db.mrtTimeline.ttsRate)))
+
+        if ns.MrtSpeakSpell then
+            ns.MrtSpeakSpell(32182, ns.db.mrtTimeline)  -- Heroism
+        end
+    end)
 end
 
 -- Macros / public API help page. Pagina exclusivamente documentativa: explica
@@ -4024,10 +4236,14 @@ end
 -- o varias categorias activas (multi-select). En runtime, detectamos en cual
 -- estamos via GetInstanceInfo + C_ChallengeMode y buscamos el loadout cuyo
 -- flag para esa categoria este encendido.
+-- Dungeon y Mythic+ fusionados: el ready check pasa antes de meter la
+-- keystone, asi que separar los dos no aporta nada — siempre se configura
+-- el mismo loadout para ambos. CheckTalentLoadout en ReadyCheckPanel.lua
+-- acepta el legacy flag `mplus` como sinonimo de `dungeon` para no romper
+-- configuracion guardada de versiones previas.
 local TALENT_CONTENT_TYPES = {
     { key = "raid",    labelKey = "Raid"          },
-    { key = "mplus",   labelKey = "Mythic+"       },
-    { key = "dungeon", labelKey = "Dungeon"       },
+    { key = "dungeon", labelKey = "Dungeon / M+"  },
     { key = "pvp",     labelKey = "PvP"           },
     { key = "delve",   labelKey = "Delve"         },
 }
@@ -4182,7 +4398,7 @@ local function BuildReadyCheckPanelPage(p)
         local y=-4
         local sh=SubH(tGeneral,ns.L["Size & Appearance"]); sh:SetPoint("TOPLEFT",C1,y); local c1y=y-20
         local defs1={
-            {ns.L["Panel Width"],160,500,5,function() return ns.db.readyCheckPanel.width end,function(v) ns.db.readyCheckPanel.width=v; ns:RefreshReadyCheckPanel() end},
+            {ns.L["Panel Width"],160,700,5,function() return ns.db.readyCheckPanel.width end,function(v) ns.db.readyCheckPanel.width=v; ns:RefreshReadyCheckPanel() end},
             {ns.L["Row Height"],16,40,1,function() return ns.db.readyCheckPanel.rowHeight end,function(v) ns.db.readyCheckPanel.rowHeight=v; ns:RefreshReadyCheckPanel() end},
             {ns.L["Font Scale"],0.8,2.5,0.05,function() return ns.db.readyCheckPanel.fontScale or 1.0 end,function(v) ns.db.readyCheckPanel.fontScale=v; ns:RefreshReadyCheckPanel() end},
             {ns.L["Opacity"],0.1,1.0,0.05,function() return ns.db.readyCheckPanel.opacity end,function(v) ns.db.readyCheckPanel.opacity=v; ns:RefreshReadyCheckPanel() end},
@@ -4449,6 +4665,742 @@ local function BuildVendorRestockPage(p)
     RefreshVendorList()
 end
 
+-- Page: Raid Healer Comms
+-- Comparte broadcasts entre los healers del grupo. Solo controles globales:
+-- toggle hideWhenEmpty + Test/Hide preview + reset de posicion.
+-- La lista de spells tracked es hardcoded en RaidHealerComms.lua por ahora.
+local function BuildRaidHealerCommsPage(p)
+    local y = -8
+    local hd = H(p, ns.L["Raid Spells"] or "Raid Spells (A)")
+    hd:SetPoint("TOPLEFT", 8, y); y = y - 18
+
+    local ht = p:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    ht:SetPoint("TOPLEFT", 8, y); ht:SetPoint("TOPRIGHT", -160, y)
+    ht:SetJustifyH("LEFT"); ht:SetWordWrap(true)
+    ht:SetText(ns.L["Broadcasts your important healer cooldown casts to other raid members running HNZ Healing Tools, and shows a panel of what your fellow healers cast in the last 5 seconds."]
+        or "Broadcasts your important healer cooldown casts to other raid members running HNZ Healing Tools, and shows a panel of what your fellow healers cast in the last 5 seconds.")
+
+    local testBtn = Btn(p, ns.L["Test"] or "Test", 70, 22)
+    testBtn:SetPoint("TOPRIGHT", -16, -8)
+    testBtn:SetScript("OnClick", function()
+        if ns.TestRaidHealerComms then ns:TestRaidHealerComms() end
+    end)
+    local hideBtn = Btn(p, ns.L["Hide"] or "Hide", 70, 22)
+    hideBtn:SetPoint("RIGHT", testBtn, "LEFT", -4, 0)
+    hideBtn:SetScript("OnClick", function()
+        if ns.HideRaidHealerCommsTest then ns:HideRaidHealerCommsTest() end
+    end)
+
+    y = y - 36
+
+    local hideEmptyCb = CreateCheckbox(p, ns.L["Hide panel when no casts"] or "Hide panel when no casts",
+        function() return ns.db.raidHealerComms.hideWhenEmpty == true end,
+        function(v)
+            ns.db.raidHealerComms.hideWhenEmpty = v and true or false
+            if ns.RefreshRaidHealerComms then ns:RefreshRaidHealerComms() end
+        end)
+    hideEmptyCb:SetPoint("TOPLEFT", 16, y); y = y - 24
+    table.insert(allCheckboxes, hideEmptyCb)
+
+    local healerOnlyCb = CreateCheckbox(p, ns.L["Show only on healer specs"] or "Show only on healer specs",
+        function() return ns.db.raidHealerComms.showOnlyForHealers ~= false end,
+        function(v)
+            ns.db.raidHealerComms.showOnlyForHealers = v and true or false
+            if ns.RefreshRaidHealerComms then ns:RefreshRaidHealerComms() end
+        end)
+    healerOnlyCb:SetPoint("TOPLEFT", 16, y); y = y - 24
+    table.insert(allCheckboxes, healerOnlyCb)
+
+    local raidOnlyCb = CreateCheckbox(p, ns.L["Show only in raid"] or "Show only in raid",
+        function() return ns.db.raidHealerComms.showOnlyInRaid ~= false end,
+        function(v)
+            ns.db.raidHealerComms.showOnlyInRaid = v and true or false
+            if ns.RefreshRaidHealerComms then ns:RefreshRaidHealerComms() end
+        end)
+    raidOnlyCb:SetPoint("TOPLEFT", 16, y); y = y - 24
+    table.insert(allCheckboxes, raidOnlyCb)
+
+    local resetBtn = Btn(p, ns.L["Reset position"] or "Reset position", 140, 24)
+    resetBtn:SetPoint("TOPLEFT", 16, y); y = y - 30
+    resetBtn:SetScript("OnClick", function()
+        ns.db.raidHealerComms.offsetX = 200
+        ns.db.raidHealerComms.offsetY = 200
+        if ns.RefreshRaidHealerComms then ns:RefreshRaidHealerComms() end
+    end)
+
+    y = y - 8
+    local listHd = SubH(p, ns.L["Tracked spells"] or "Tracked spells")
+    listHd:SetPoint("TOPLEFT", 8, y); y = y - 18
+
+    local listHelp = p:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    listHelp:SetPoint("TOPLEFT", 16, y); listHelp:SetPoint("RIGHT", -16, 0)
+    listHelp:SetJustifyH("LEFT"); listHelp:SetWordWrap(true)
+    listHelp:SetText(ns.L["Add by spell ID or exact name. Reset restores the curated default set (and re-picks up any new defaults added in future updates)."]
+        or "Add by spell ID or exact name. Reset restores the curated default set (and re-picks up any new defaults added in future updates).")
+    y = y - 26
+
+    -- Add row: input + Add + Reset to defaults
+    local addEb = EditBox(p, 220)
+    addEb:SetPoint("TOPLEFT", 16, y)
+    -- Placeholder hint dentro del editbox. Lo escondemos al ganar focus o
+    -- cuando el user empieza a tipear.
+    local ph = addEb:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    ph:SetPoint("LEFT", addEb, "LEFT", 6, 0)
+    ph:SetText(ns.L["Spell ID or name"] or "Spell ID or name")
+    local function UpdatePlaceholder()
+        if addEb:HasFocus() or (addEb:GetText() or "") ~= "" then ph:Hide() else ph:Show() end
+    end
+    addEb:HookScript("OnEditFocusGained", UpdatePlaceholder)
+    addEb:HookScript("OnEditFocusLost", UpdatePlaceholder)
+    addEb:HookScript("OnTextChanged", UpdatePlaceholder)
+
+    local addBtn = Btn(p, ns.L["Add"] or "Add", 60, 22)
+    addBtn:SetPoint("LEFT", addEb, "RIGHT", 6, 0)
+
+    local resetSpellsBtn = Btn(p, ns.L["Reset to defaults"] or "Reset to defaults", 140, 22)
+    resetSpellsBtn:SetPoint("LEFT", addBtn, "RIGHT", 8, 0)
+
+    y = y - 26
+
+    local feedback = p:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    feedback:SetPoint("TOPLEFT", 16, y); feedback:SetPoint("RIGHT", -16, 0)
+    feedback:SetJustifyH("LEFT"); feedback:SetWordWrap(false)
+    feedback:SetText("")
+    y = y - 16
+
+    local function Err(msg) feedback:SetTextColor(1, 0.4, 0.4); feedback:SetText(msg or "") end
+    local function Ok(msg)  feedback:SetTextColor(0.5, 1, 0.5);  feedback:SetText(msg or "") end
+
+    -- Container del list (children se wipean en RefreshList via pool).
+    local listFrame = CreateFrame("Frame", nil, p)
+    listFrame:SetPoint("TOPLEFT", 16, y)
+    listFrame:SetPoint("TOPRIGHT", -16, y)
+    listFrame:SetHeight(1)
+    local rowPool = {}
+    local ROW_H = 22
+
+    local RefreshList
+
+    local function MakeRow(idx)
+        local r = rowPool[idx]
+        if r then return r end
+        r = CreateFrame("Frame", nil, listFrame, "BackdropTemplate")
+        r:SetHeight(ROW_H)
+        r:EnableMouse(true)
+        -- Background sutil tipo zebra; el alt-color se aplica en RefreshList
+        -- segun paridad del index para que sea estable tras add/remove.
+        r:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8" })
+        r.icon = r:CreateTexture(nil, "ARTWORK")
+        r.icon:SetSize(18, 18); r.icon:SetPoint("LEFT", 4, 0)
+        r.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+        r.name = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        r.name:SetPoint("LEFT", r.icon, "RIGHT", 6, 0)
+        r.name:SetPoint("RIGHT", r, "RIGHT", -28, 0)
+        r.name:SetJustifyH("LEFT"); r.name:SetWordWrap(false)
+        local rm = CreateFrame("Button", nil, r); rm:SetSize(20, 20); rm:SetPoint("RIGHT", -4, 0)
+        local rt = rm:CreateFontString(nil, "OVERLAY", "GameFontRed"); rt:SetAllPoints(); rt:SetText("X")
+        local rh = rm:CreateTexture(nil, "HIGHLIGHT"); rh:SetAllPoints(); rh:SetColorTexture(0.8, 0.2, 0.2, 0.3)
+        rm:SetScript("OnEnter", function(s)
+            GameTooltip:SetOwner(s, "ANCHOR_RIGHT")
+            GameTooltip:AddLine(ns.L["Remove"] or "Remove")
+            GameTooltip:Show()
+        end)
+        rm:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        r.remove = rm
+        r:SetScript("OnEnter", function(self)
+            if not self._sid then return end
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            GameTooltip:SetSpellByID(self._sid)
+            GameTooltip:Show()
+        end)
+        r:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        rowPool[idx] = r
+        return r
+    end
+
+    RefreshList = function()
+        local spells = (ns.GetRaidHealerCommsTrackedSpells and ns:GetRaidHealerCommsTrackedSpells())
+            or ns.RAID_HEALER_COMMS_DEFAULT_SPELLS or {}
+        local sortedIDs = {}
+        for sid in pairs(spells) do table.insert(sortedIDs, sid) end
+        table.sort(sortedIDs, function(a, b)
+            local na = ns.GetSpellDisplayInfo and ns.GetSpellDisplayInfo(a) or tostring(a)
+            local nb = ns.GetSpellDisplayInfo and ns.GetSpellDisplayInfo(b) or tostring(b)
+            return na < nb
+        end)
+
+        for i, sid in ipairs(sortedIDs) do
+            local r = MakeRow(i)
+            r._sid = sid
+            local name, icon = ns.GetSpellDisplayInfo(sid)
+            r.icon:SetTexture(icon)
+            r.name:SetText(string.format("%s |cff888888(%d)|r", name or "?", sid))
+            -- Zebra stripes para escaneo rapido. Indice par mas claro.
+            if i % 2 == 0 then r:SetBackdropColor(1, 1, 1, 0.04)
+            else r:SetBackdropColor(1, 1, 1, 0.00) end
+            r:ClearAllPoints()
+            r:SetPoint("TOPLEFT", listFrame, "TOPLEFT", 0, -(i - 1) * ROW_H)
+            r:SetPoint("RIGHT", listFrame, "RIGHT", 0, 0)
+            -- Re-bind del remove para capturar el sid actual de esta posicion.
+            r.remove:SetScript("OnClick", function()
+                if ns.RemoveRaidHealerCommsSpell then
+                    ns:RemoveRaidHealerCommsSpell(sid)
+                    Ok(string.format(ns.L["Removed: %s"] or "Removed: %s", name or tostring(sid)))
+                    RefreshList()
+                end
+            end)
+            r:Show()
+        end
+        for j = #sortedIDs + 1, #rowPool do rowPool[j]:Hide() end
+        listFrame:SetHeight(math.max(1, #sortedIDs * ROW_H + 4))
+        -- Re-ajustar la altura del scroll child para que la nueva lista entre
+        -- en el viewport. Sin esto, agregar spells que excedan la altura
+        -- inicial queda truncado por el scroll.
+        if FitScrollChildHeightNow then
+            C_Timer.After(0, function() FitScrollChildHeightNow(p, 24) end)
+        end
+    end
+
+    addBtn:SetScript("OnClick", function()
+        if not ns.AddRaidHealerCommsSpell then return end
+        local input = (addEb:GetText() or ""):trim()
+        -- ojo: `X and Y(...)` colapsa a un solo valor, no podemos hacer
+        -- `ok, sid, name = ns.Foo and ns:Foo(...)`. Llamamos directo.
+        local ok, sidOrErr, name = ns:AddRaidHealerCommsSpell(input)
+        if ok then
+            Ok(string.format(ns.L["Added: %s"] or "Added: %s", name or tostring(sidOrErr)))
+            addEb:SetText("")
+            UpdatePlaceholder()
+            RefreshList()
+        else
+            Err(sidOrErr or "?")
+        end
+    end)
+    addEb:SetScript("OnEnterPressed", function() addBtn:Click() end)
+
+    resetSpellsBtn:SetScript("OnClick", function()
+        if ns.ResetRaidHealerCommsSpells then
+            ns:ResetRaidHealerCommsSpells()
+            Ok(ns.L["Reset to defaults."] or "Reset to defaults.")
+            RefreshList()
+        end
+    end)
+
+    UpdatePlaceholder()
+    RefreshList()
+end
+
+-- ============================================================
+-- Page: Simulated Auras (preset-based UI)
+-- ============================================================
+-- Cada preset hardcodeado en SimulatedAuras.lua aparece como una card. El
+-- user habilita el preset (checkbox) — eso lo agrega a su profile con los
+-- defaults curados. Una vez habilitado, puede ajustar stacks/duration por
+-- row, y desplegar la macro recomendada en un editbox seleccionable.
+-- Tambien hay un fallback para agregar hechizos custom por spellID.
+local function BuildSimulatedAurasPage(p)
+    -- "Próximamente" placeholder mientras la feature esta en desarrollo. El
+    -- modulo SimulatedAuras.lua sigue cargado (slash /hnzsim + state machine
+    -- continuan funcionando para power users), pero la UI esta gated.
+    -- Cuando la integracion con CursorDisplay este completa y validada in-game,
+    -- borrar este early return para reactivar el preset-based UI completo
+    -- que vive abajo.
+    local y = -8
+    local hd = H(p, ns.L["Simulated Auras"] or "Simulated Auras (A)")
+    hd:SetPoint("TOPLEFT", 8, y); y = y - 30
+
+    local soon = p:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+    soon:SetPoint("TOPLEFT", 16, y)
+    soon:SetText(ns.L["Coming soon"] or "Próximamente")
+    soon:SetTextColor(1.0, 0.85, 0.4)
+    y = y - 32
+
+    local desc = p:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    desc:SetPoint("TOPLEFT", 16, y); desc:SetPoint("RIGHT", -16, 0)
+    desc:SetJustifyH("LEFT"); desc:SetWordWrap(true)
+    desc:SetText(ns.L["A curated list of preset spells whose aura the WoW API hides from addons. Each preset will include the macro to copy into your action bar. The state machine is functional via the /hnzsim slash command but the UI integration is still in testing."]
+        or "Lista curada de hechizos cuya aura la API de WoW oculta a los addons. Cada preset incluirá la macro lista para copiar en tu barra de acción. El state machine ya funciona vía el comando /hnzsim pero la integración con el display sigue en pruebas.")
+    do return end  -- todo lo siguiente queda en codigo muerto hasta el unlock
+    --[[
+    local _y_legacy_keep_below = -8
+    -- el codigo de abajo es la implementacion completa preset-based; se
+    -- reactivara borrando este block-comment + el `do return end` de arriba.
+
+    local feedback = p:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    feedback:SetPoint("TOPLEFT", 16, y); feedback:SetPoint("RIGHT", -16, 0)
+    feedback:SetJustifyH("LEFT"); feedback:SetWordWrap(false)
+    feedback:SetText("")
+    y = y - 16
+
+    local function Err(msg) feedback:SetTextColor(1, 0.4, 0.4); feedback:SetText(msg or "") end
+    local function Ok(msg)  feedback:SetTextColor(0.5, 1, 0.5);  feedback:SetText(msg or "") end
+
+    -- Container donde apilamos las cards de preset + el fallback custom.
+    local listFrame = CreateFrame("Frame", nil, p)
+    listFrame:SetPoint("TOPLEFT", 16, y)
+    listFrame:SetPoint("TOPRIGHT", -16, y)
+    listFrame:SetHeight(1)
+
+    local cardPool = {}
+    -- Una card por preset. Altura colapsada uniforme (las instrucciones viven
+    -- en un modal aparte, no inline). 70px para acomodar 3 lineas de texto:
+    -- nombre + spec hint + status runtime.
+    local CARD_H_BASE = 72
+
+    local RefreshList
+
+    -- ====== Modal de instrucciones (singleton, contenido swap por preset) ======
+    -- El modal es persistente; cada vez que el user hace clic en "Instrucciones"
+    -- de una card, llenamos sus campos con los datos del preset y lo mostramos.
+    local instructionsModal
+    local function BuildInstructionsModal()
+        if instructionsModal then return instructionsModal end
+        local m = CreateFrame("Frame", "HNZSimAurasInstructionsModal", UIParent, "BackdropTemplate")
+        m:SetSize(560, 480)
+        m:SetPoint("CENTER")
+        m:SetFrameStrata("FULLSCREEN_DIALOG"); m:SetToplevel(true)
+        m:SetFrameLevel(900)
+        m:EnableMouse(true); m:SetMovable(true)
+        m:RegisterForDrag("LeftButton")
+        m:SetScript("OnDragStart", function(self) self:StartMoving() end)
+        m:SetScript("OnDragStop", function(self) self:StopMovingOrSizing() end)
+        m:SetBackdrop({
+            bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
+            edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+            tile = true, tileSize = 16, edgeSize = 14,
+            insets = { left = 4, right = 4, top = 4, bottom = 4 },
+        })
+        m:SetBackdropColor(0.05, 0.05, 0.08, 0.95)
+        m:SetBackdropBorderColor(0.5, 0.5, 0.6, 1)
+        m:Hide()
+
+        -- ESC cierra
+        m:SetScript("OnKeyDown", function(self, key)
+            if key == "ESCAPE" then self:Hide() end
+        end)
+        m:EnableKeyboard(true)
+        m:SetPropagateKeyboardInput(false)
+
+        -- Header: icono + titulo + spec
+        m.icon = m:CreateTexture(nil, "ARTWORK")
+        m.icon:SetSize(40, 40); m.icon:SetPoint("TOPLEFT", 14, -14)
+        m.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+
+        m.title = m:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+        m.title:SetPoint("TOPLEFT", m.icon, "TOPRIGHT", 10, -2)
+        m.title:SetPoint("RIGHT", -50, 0)
+        m.title:SetJustifyH("LEFT"); m.title:SetWordWrap(false)
+
+        m.subtitle = m:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        m.subtitle:SetPoint("TOPLEFT", m.title, "BOTTOMLEFT", 0, -4)
+        m.subtitle:SetPoint("RIGHT", m.title, "RIGHT", 0, 0)
+        m.subtitle:SetJustifyH("LEFT"); m.subtitle:SetWordWrap(false)
+
+        -- Close button (X) arriba a la derecha
+        m.closeBtn = CreateFrame("Button", nil, m, "UIPanelCloseButton")
+        m.closeBtn:SetPoint("TOPRIGHT", -4, -4)
+        m.closeBtn:SetScript("OnClick", function() m:Hide() end)
+
+        -- Scrollable body
+        local sf = CreateFrame("ScrollFrame", nil, m, "UIPanelScrollFrameTemplate")
+        sf:SetPoint("TOPLEFT", 14, -64)
+        sf:SetPoint("BOTTOMRIGHT", -32, 52)
+        local content = CreateFrame("Frame", nil, sf)
+        content:SetSize(500, 1)
+        sf:SetScrollChild(content)
+        m.content = content
+
+        -- Notes
+        m.notes = content:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+        m.notes:SetPoint("TOPLEFT", 0, 0); m.notes:SetWidth(500)
+        m.notes:SetJustifyH("LEFT"); m.notes:SetWordWrap(true)
+        m.notes:SetTextColor(0.9, 0.9, 0.95)
+
+        -- "Pasos:" header
+        m.stepsHeader = content:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+        m.stepsHeader:SetPoint("TOPLEFT", m.notes, "BOTTOMLEFT", 0, -12)
+        m.stepsHeader:SetText(ns.L["Steps"] or "Pasos a seguir")
+        m.stepsHeader:SetTextColor(1.0, 0.85, 0.4)
+
+        -- Pool de step fontstrings (created lazy)
+        m.stepFS = {}
+
+        -- "Macro" header
+        m.macroHeader = content:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+        m.macroHeader:SetText(ns.L["Macro (CTRL+C to copy)"] or "Macro (CTRL+C para copiar)")
+        m.macroHeader:SetTextColor(1.0, 0.85, 0.4)
+
+        -- Macro editbox container
+        m.macroBg = CreateFrame("Frame", nil, content, "BackdropTemplate")
+        m.macroBg:SetBackdrop({
+            bgFile = "Interface\\Buttons\\WHITE8x8",
+            edgeFile = "Interface\\Buttons\\WHITE8x8",
+            edgeSize = 1,
+        })
+        m.macroBg:SetBackdropColor(0, 0, 0, 0.6)
+        m.macroBg:SetBackdropBorderColor(0.4, 0.7, 0.4, 0.9)
+        m.macroBg:SetSize(500, 50)
+
+        m.macroEb = CreateFrame("EditBox", nil, m.macroBg)
+        m.macroEb:SetPoint("TOPLEFT", 6, -4); m.macroEb:SetPoint("BOTTOMRIGHT", -6, 4)
+        m.macroEb:SetMultiLine(true)
+        m.macroEb:SetFontObject("GameFontHighlight")
+        m.macroEb:SetTextColor(0.65, 1.0, 0.65)
+        m.macroEb:SetAutoFocus(false)
+        m.macroEb:SetScript("OnEditFocusGained", function(self) self:HighlightText() end)
+        m.macroEb:SetScript("OnEscapePressed", function(self) self:ClearFocus(); m:Hide() end)
+        m.macroEb:SetScript("OnMouseUp", function(self) self:SetFocus(); self:HighlightText() end)
+
+        -- Botón cerrar en el footer
+        m.closeFooter = Btn(m, ns.L["Close"] or "Cerrar", 100, 24)
+        m.closeFooter:SetPoint("BOTTOM", 0, 14)
+        m.closeFooter:SetScript("OnClick", function() m:Hide() end)
+
+        instructionsModal = m
+        return m
+    end
+
+    local function ShowInstructionsFor(preset)
+        local m = BuildInstructionsModal()
+
+        local name, icon = ns.GetSpellDisplayInfo and ns.GetSpellDisplayInfo(preset.spellID)
+        if (not icon or icon == 134400) and preset.iconID then icon = preset.iconID end
+        m.icon:SetTexture(icon or 134400)
+        m.title:SetText((name or preset.fallbackLabel or "?") ..
+            string.format("  |cff888888(%d)|r", preset.spellID))
+
+        -- Spec hint con color de clase
+        local cls = preset.class
+        local r, g, b = 0.75, 0.75, 0.85
+        if cls and RAID_CLASS_COLORS and RAID_CLASS_COLORS[cls] then
+            local c = RAID_CLASS_COLORS[cls]
+            r, g, b = c.r, c.g, c.b
+        end
+        m.subtitle:SetTextColor(r, g, b)
+        m.subtitle:SetText(preset.specHint or "")
+
+        -- Notes
+        m.notes:SetText(preset.notes or "")
+
+        -- Layout cursor para el contenido scrollable
+        local yCursor = m.notes:GetStringHeight() + 12 + 18 -- notes + gap + header
+        m.stepsHeader:ClearAllPoints()
+        m.stepsHeader:SetPoint("TOPLEFT", m.notes, "BOTTOMLEFT", 0, -12)
+        yCursor = m.notes:GetStringHeight() + 12 + 22
+
+        -- Steps numerados: pool re-uso
+        local steps = preset.steps or {}
+        for i, stepText in ipairs(steps) do
+            local fs = m.stepFS[i]
+            if not fs then
+                fs = m.content:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+                fs:SetWidth(490); fs:SetJustifyH("LEFT"); fs:SetWordWrap(true)
+                m.stepFS[i] = fs
+            end
+            fs:SetText(string.format("|cffffd200%d.|r %s", i, stepText))
+            fs:SetTextColor(0.9, 0.9, 0.95)
+            fs:ClearAllPoints()
+            fs:SetPoint("TOPLEFT", m.content, "TOPLEFT", 12, -yCursor)
+            fs:Show()
+            yCursor = yCursor + fs:GetStringHeight() + 8
+        end
+        -- Esconder steps sobrantes del pool
+        for j = #steps + 1, #m.stepFS do m.stepFS[j]:Hide() end
+
+        -- Macro section
+        yCursor = yCursor + 10
+        m.macroHeader:ClearAllPoints()
+        m.macroHeader:SetPoint("TOPLEFT", m.content, "TOPLEFT", 0, -yCursor)
+        yCursor = yCursor + 22
+
+        local macroText = table.concat(preset.macroLines or {}, "\n")
+        m.macroEb:SetText(macroText)
+        -- Calcular altura por cantidad de lineas (aprox 16px por linea + padding)
+        local lineCount = math.max(1, select(2, macroText:gsub("\n", "\n")) + 1)
+        local macroH = math.max(36, lineCount * 16 + 12)
+        m.macroBg:SetSize(500, macroH)
+        m.macroBg:ClearAllPoints()
+        m.macroBg:SetPoint("TOPLEFT", m.content, "TOPLEFT", 0, -yCursor)
+        yCursor = yCursor + macroH + 10
+
+        m.content:SetHeight(yCursor)
+        m:Show()
+        m:Raise()
+    end
+
+    -- Construye una card persistente (pool). En RefreshList re-bindeamos los
+    -- handlers con el preset actual de esa posicion.
+    local function MakeCard(idx)
+        local r = cardPool[idx]
+        if r then return r end
+        r = CreateFrame("Frame", nil, listFrame, "BackdropTemplate")
+        r:SetHeight(CARD_H_BASE)
+        r:EnableMouse(true)
+        r:SetBackdrop({
+            bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
+            edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+            tile = true, tileSize = 16, edgeSize = 12,
+            insets = { left = 2, right = 2, top = 2, bottom = 2 },
+        })
+        r:SetBackdropColor(0.08, 0.08, 0.12, 0.7)
+        r:SetBackdropBorderColor(0.35, 0.35, 0.45, 0.7)
+
+        -- Icono del spell
+        r.icon = r:CreateTexture(nil, "ARTWORK")
+        r.icon:SetSize(32, 32); r.icon:SetPoint("TOPLEFT", 8, -8)
+        r.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+
+        -- Nombre (linea 1)
+        r.name = r:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        r.name:SetPoint("TOPLEFT", r.icon, "TOPRIGHT", 8, -2)
+        r.name:SetPoint("RIGHT", r, "RIGHT", -180, 0)
+        r.name:SetJustifyH("LEFT"); r.name:SetWordWrap(false)
+
+        -- Spec hint (linea 2)
+        r.spec = r:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        r.spec:SetPoint("TOPLEFT", r.name, "BOTTOMLEFT", 0, -2)
+        r.spec:SetPoint("RIGHT", r.name, "RIGHT", 0, 0)
+        r.spec:SetJustifyH("LEFT"); r.spec:SetWordWrap(false)
+
+        -- Status indicator: muestra estado runtime del preset (deshabilitado /
+        -- habilitado sin state / activo con cargas actuales). Util para debug
+        -- visual: el user ve si su cast se registro o no.
+        r.statusText = r:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        r.statusText:SetPoint("TOPLEFT", r.spec, "BOTTOMLEFT", 0, -2)
+        r.statusText:SetPoint("RIGHT", r.spec, "RIGHT", 0, 0)
+        r.statusText:SetJustifyH("LEFT"); r.statusText:SetWordWrap(false)
+
+        -- Stacks input (compacto a la derecha)
+        r.stacksLbl = r:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        r.stacksLbl:SetPoint("TOPRIGHT", r, "TOPRIGHT", -160, -12)
+        r.stacksLbl:SetText(ns.L["Stacks"] or "Stacks")
+        r.stacksEb = MakeEditBox(r, 32, 18)
+        r.stacksEb:SetPoint("TOPLEFT", r.stacksLbl, "BOTTOMLEFT", 0, -2)
+        r.stacksEb:SetNumeric(true); r.stacksEb:SetMaxLetters(3)
+
+        r.durLbl = r:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        r.durLbl:SetPoint("TOPRIGHT", r, "TOPRIGHT", -106, -12)
+        r.durLbl:SetText(ns.L["Duration"] or "Duration")
+        r.durEb = MakeEditBox(r, 42, 18)
+        r.durEb:SetPoint("TOPLEFT", r.durLbl, "BOTTOMLEFT", 0, -2)
+        r.durEb:SetNumeric(true); r.durEb:SetMaxLetters(4)
+
+        -- Toggle "Habilitar/Deshabilitar" (boton)
+        r.toggleBtn = Btn(r, "", 90, 22)
+        r.toggleBtn:SetPoint("TOPRIGHT", r, "TOPRIGHT", -8, -10)
+
+        -- Boton "Instrucciones" abre un modal con steps + macro detallados.
+        r.helpBtn = Btn(r, ns.L["Instructions"] or "Instructions", 110, 22)
+        r.helpBtn:SetPoint("BOTTOMRIGHT", r, "BOTTOMRIGHT", -8, 8)
+
+        -- Boton "Probar" — dispara PressSpell manualmente. Sirve para validar
+        -- que el state machine + integracion con CursorDisplay funcionan sin
+        -- necesidad de castear el spell real. Si el "2" aparece al clickearlo,
+        -- la pipeline interna esta OK y el problema es UNIT_SPELLCAST_SUCCEEDED.
+        r.testBtn = Btn(r, ns.L["Test"] or "Probar", 80, 22)
+        r.testBtn:SetPoint("RIGHT", r.helpBtn, "LEFT", -4, 0)
+
+        cardPool[idx] = r
+        return r
+    end
+
+    RefreshList = function()
+        local allPresets = (ns.GetSimulatedAuraPresets and ns:GetSimulatedAuraPresets()) or {}
+        -- Filtrado por clase del player. Cada preset declara su `class` token
+        -- (e.g. "SHAMAN"). Solo mostramos los presets que matcheen — un druida
+        -- no necesita ver Surging Totem, etc. Si el preset no tiene `class`
+        -- (preset cross-class), siempre se muestra.
+        -- NOTA: `local _, x = Y and Y()` colapsa el multi-return a un solo
+        -- valor (el primero). Hay que llamar directo para destructurar bien.
+        local playerClass
+        if UnitClass then
+            _, playerClass = UnitClass("player")
+        end
+        local presets = {}
+        for _, pr in ipairs(allPresets) do
+            if not pr.class or pr.class == playerClass then
+                table.insert(presets, pr)
+            end
+        end
+
+        local yCursor = 0
+        local SPACER = 6
+
+        -- Empty state: si no hay presets para esta clase, mostramos un mensaje.
+        if #presets == 0 then
+            if not p._emptyText then
+                p._emptyText = p:CreateFontString(nil, "OVERLAY", "GameFontDisable")
+                p._emptyText:SetPoint("TOPLEFT", listFrame, "TOPLEFT", 12, -8)
+            end
+            p._emptyText:SetText(ns.L["No presets available for your class yet."] or "No hay presets disponibles para tu clase todavia.")
+            p._emptyText:Show()
+            -- Hide todas las cards del pool si pasa a vacio.
+            for j = 1, #cardPool do cardPool[j]:Hide() end
+            listFrame:SetHeight(40)
+            return
+        else
+            if p._emptyText then p._emptyText:Hide() end
+        end
+
+        for i, preset in ipairs(presets) do
+            local card = MakeCard(i)
+            local sid = preset.spellID
+            card._sid = sid
+
+            local name, icon = ns.GetSpellDisplayInfo and ns.GetSpellDisplayInfo(sid)
+            -- 134400 es el "?" question mark. Si caimos a ese fallback (Hero Talent
+            -- spells no aprendidas, data no cacheada), usar el iconID hardcoded
+            -- del preset para que la card no quede con "?".
+            if (not icon or icon == 134400) and preset.iconID then icon = preset.iconID end
+            card.icon:SetTexture(icon or 134400)
+            card.name:SetText(string.format("%s |cff888888(%d)|r", name or preset.fallbackLabel or "?", sid))
+
+            -- Class color para el spec hint
+            local cls = preset.class
+            local r, g, b = 0.75, 0.75, 0.85
+            if cls and RAID_CLASS_COLORS and RAID_CLASS_COLORS[cls] then
+                local c = RAID_CLASS_COLORS[cls]
+                r, g, b = c.r, c.g, c.b
+            end
+            card.spec:SetTextColor(r, g, b)
+            card.spec:SetText(preset.specHint or "")
+
+            -- Current profile state
+            local profileEntry
+            local entries = (ns.GetSimulatedAuras and ns:GetSimulatedAuras()) or {}
+            for _, e in ipairs(entries) do
+                if tonumber(e.spellID) == sid then profileEntry = e; break end
+            end
+            local enabled = profileEntry ~= nil
+            local curStacks = (profileEntry and tonumber(profileEntry.initialStacks)) or preset.initialStacks
+            local curDur    = (profileEntry and tonumber(profileEntry.duration))      or preset.duration
+
+            card.stacksEb:SetText(tostring(curStacks or 1))
+            card.durEb:SetText(tostring(curDur or 0))
+            -- Editboxes solo activos cuando el preset esta habilitado
+            card.stacksEb:SetEnabled(enabled)
+            card.durEb:SetEnabled(enabled)
+            card.stacksEb:SetAlpha(enabled and 1.0 or 0.4)
+            card.durEb:SetAlpha(enabled and 1.0 or 0.4)
+
+            card.stacksEb:SetScript("OnEditFocusLost", function(self)
+                local v = tonumber(self:GetText()) or 1
+                if v < 1 then v = 1 end
+                if v > 99 then v = 99 end
+                self:SetText(tostring(v))
+                if ns.UpdateSimulatedAura then ns:UpdateSimulatedAura(sid, "initialStacks", v) end
+            end)
+            card.stacksEb:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
+            card.durEb:SetScript("OnEditFocusLost", function(self)
+                local v = tonumber(self:GetText()) or 0
+                if v < 0 then v = 0 end
+                if v > 3600 then v = 3600 end
+                self:SetText(tostring(v))
+                if ns.UpdateSimulatedAura then ns:UpdateSimulatedAura(sid, "duration", v) end
+            end)
+            card.durEb:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
+
+            -- Toggle button
+            if enabled then
+                card.toggleBtn:SetText(ns.L["Disable"] or "Disable")
+            else
+                card.toggleBtn:SetText(ns.L["Enable"] or "Enable")
+            end
+            card.toggleBtn:SetScript("OnClick", function()
+                if enabled then
+                    if ns.RemoveSimulatedAura then ns:RemoveSimulatedAura(sid) end
+                    Ok(string.format(ns.L["Disabled: %s"] or "Disabled: %s", name or preset.fallbackLabel or tostring(sid)))
+                else
+                    if ns.EnableSimulatedAuraPreset then ns:EnableSimulatedAuraPreset(sid) end
+                    Ok(string.format(ns.L["Enabled: %s"] or "Enabled: %s", name or preset.fallbackLabel or tostring(sid)))
+                end
+                RefreshList()
+            end)
+
+            -- Status indicator runtime: refleja si el preset esta habilitado
+            -- y si tiene state activo. Helpful para debug ("por que no veo el
+            -- icono?" → el statusText te dice si tu cast registro o no).
+            if not enabled then
+                card.statusText:SetTextColor(0.6, 0.6, 0.6)
+                card.statusText:SetText(ns.L["Status: disabled"] or "Estado: deshabilitado")
+            else
+                local runtimeSt = (ns.GetSimulatedAuraRuntimeState and ns:GetSimulatedAuraRuntimeState(sid))
+                if runtimeSt then
+                    local remaining = ""
+                    if runtimeSt.duration and runtimeSt.duration > 0 then
+                        local rem = (runtimeSt.appliedAt + runtimeSt.duration) - GetTime()
+                        if rem > 0 then
+                            remaining = string.format("  ·  %.0fs", rem)
+                        end
+                    end
+                    card.statusText:SetTextColor(0.5, 1.0, 0.5)
+                    card.statusText:SetText(string.format(
+                        (ns.L["Status: active %d/%d cargas%s"] or "Estado: activo %d/%d cargas%s"),
+                        runtimeSt.stacks or 0, runtimeSt.initialStacks or curStacks or 0, remaining))
+                else
+                    card.statusText:SetTextColor(0.9, 0.85, 0.5)
+                    card.statusText:SetText(ns.L["Status: enabled, waiting for cast"] or "Estado: habilitado, esperando cast")
+                end
+            end
+
+            -- Boton Probar: dispara PressSpell manual (no requiere /reload ni
+            -- castear el spell real). Si despues de clickearlo el icono en
+            -- Cursor muestra "2", la pipeline interna esta OK y el problema
+            -- real era que UNIT_SPELLCAST_SUCCEEDED no estaba disparando para
+            -- ese spellID. Si NO muestra "2", entonces es la integracion del
+            -- result.stacks con el display.
+            card.testBtn:SetEnabled(enabled)
+            card.testBtn:SetAlpha(enabled and 1.0 or 0.4)
+            card.testBtn:SetScript("OnClick", function()
+                if ns.TriggerSimulatedAuraPress then
+                    ns:TriggerSimulatedAuraPress(sid)
+                    Ok(string.format(ns.L["Test press fired: %s"] or "Press de prueba disparado: %s", name or tostring(sid)))
+                end
+            end)
+
+            -- Boton Instrucciones abre el modal detallado
+            card:SetHeight(CARD_H_BASE)
+            card.helpBtn:SetText(ns.L["Instructions"] or "Instructions")
+            card.helpBtn:SetScript("OnClick", function()
+                ShowInstructionsFor(preset)
+            end)
+
+            card:ClearAllPoints()
+            card:SetPoint("TOPLEFT", listFrame, "TOPLEFT", 0, -yCursor)
+            card:SetPoint("RIGHT", listFrame, "RIGHT", 0, 0)
+            card:Show()
+
+            yCursor = yCursor + CARD_H_BASE + SPACER
+        end
+
+        -- Esconder cards sobrantes del pool
+        for j = #presets + 1, #cardPool do cardPool[j]:Hide() end
+
+        listFrame:SetHeight(math.max(1, yCursor + 4))
+        if FitScrollChildHeightNow then
+            C_Timer.After(0, function() FitScrollChildHeightNow(p, 24) end)
+        end
+    end
+
+    RefreshList()
+
+    -- Ticker para mantener live el statusText (cargas actuales + remaining
+    -- duration) mientras la pagina esta visible. Sin esto, el status solo
+    -- refresca al hacer Add/Remove/Toggle. 0.5s da feedback rapido sin
+    -- abrumar al CPU.
+    local liveTicker
+    p:HookScript("OnShow", function()
+        if liveTicker then liveTicker:Cancel() end
+        liveTicker = C_Timer.NewTicker(0.5, function()
+            if p:IsShown() then RefreshList() else liveTicker:Cancel(); liveTicker = nil end
+        end)
+    end)
+    p:HookScript("OnHide", function()
+        if liveTicker then liveTicker:Cancel(); liveTicker = nil end
+    end)
+    --]] -- fin del bloque comentado por el "Coming soon" stub.
+end
+
 local function BuildGeneralPage(p)
     HNZHealingToolsDB.general = HNZHealingToolsDB.general or {}
     local g = HNZHealingToolsDB.general
@@ -4495,12 +5447,18 @@ local function BuildGeneralPage(p)
     -- el flag cada tick (MrtTimeline) y no necesitan refresh explicito. Si el
     -- metodo no existe, skipeamos sin error.
     local FEATURE_TOGGLES = {
-        { key = "cursorDisplay",   labelKey = "Cursor",      refresh = "RefreshCursorDisplay" },
-        { key = "ringDisplay",     labelKey = "Ring",        refresh = "RefreshRingDisplay"   },
-        { key = "cooldownPulse",   labelKey = "Pulse",       refresh = "RefreshCooldownPulse" },
-        { key = "cursorRing",      labelKey = "Cursor Ring", refresh = "RefreshCursorRing"    },
+        { key = "cursorDisplay",   labelKey = "Cursor",        refresh = "RefreshCursorDisplay" },
+        { key = "ringDisplay",     labelKey = "Ring",          refresh = "RefreshRingDisplay"   },
+        { key = "cooldownPulse",   labelKey = "Pulse",         refresh = "RefreshCooldownPulse" },
+        { key = "cursorRing",      labelKey = "Cursor Ring",   refresh = "RefreshCursorRing"    },
         { key = "mrtTimeline",     labelKey = "MRT / NSRT"  },
-        { key = "readyCheckPanel", labelKey = "Ready Check", refresh = "RefreshReadyCheckPanel" },
+        { key = "readyCheckPanel", labelKey = "Ready Check",   refresh = "RefreshReadyCheckPanel" },
+        { key = "vendorRestock",   labelKey = "Auction House", refresh = "RefreshVendorRestockButton" },
+        { key = "raidHealerComms", labelKey = "Raid Spells",  refresh = "RefreshRaidHealerComms" },
+        -- simulatedAuras intencionalmente fuera del toggle de "Habilitar Funciones"
+        -- mientras la feature esta en "proximamente" — el page builder muestra
+        -- placeholder. La logica del modulo (state machine + /hnzsim) sigue
+        -- cargada por si algun power user quiere probarla desde slash.
     }
     for _, ft in ipairs(FEATURE_TOGGLES) do
         if ns.db[ft.key] then
@@ -5269,6 +6227,8 @@ function ns:CreateConfigWindow()
         }},
         {name=ns.L["Ready Check"],   enabledKey="readyCheckPanel", builder=BuildReadyCheckPanelPage},
         {name=ns.L["Auction House"] or "Auction House", enabledKey="vendorRestock", builder=BuildVendorRestockPage},
+        {name=ns.L["Raid Spells"] or "Raid Spells (A)",   enabledKey="raidHealerComms", builder=BuildRaidHealerCommsPage},
+        {name=ns.L["Simulated Auras"] or "Simulated Auras (A)", enabledKey="simulatedAuras",  builder=BuildSimulatedAurasPage},
         {name=ns.L["Macros"],        builder=BuildMacrosPage},
         {name=ns.L["Profiles"],      builder=BuildProfilesPage},
     }

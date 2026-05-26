@@ -36,7 +36,7 @@ ns.DEFAULT_COLORS = DEFAULT_COLORS
 --   * eliminas un campo y necesitas convertir su valor a otra cosa
 -- ============================================================
 
-local CURRENT_SCHEMA_VERSION = 5
+local CURRENT_SCHEMA_VERSION = 6
 
 local function MigrateVisibilityField(cfg)
     if not cfg then return end
@@ -112,6 +112,16 @@ local MIGRATIONS = {
         vr.visibility = nil
         vr.buttonScale = nil
         vr.opacity = nil
+    end,
+    [6] = function(p)
+        -- Ready Check Panel: bumpeamos el width default 320 -> 420 porque las
+        -- filas nuevas (talent loadout "Sin loadout asignado para Mazmorra / M+",
+        -- talentos incorrectos con activeName + expectedName) no entraban en 320.
+        -- Solo migramos cuando el user tenia exactamente el viejo default — si
+        -- ya lo habia subido o bajado a algo distinto respetamos su preferencia.
+        if p.readyCheckPanel and p.readyCheckPanel.width == 320 then
+            p.readyCheckPanel.width = 420
+        end
     end,
 }
 
@@ -266,6 +276,16 @@ ns.PROFILE_DEFAULTS = {
         soundEnabled = false,
         soundName = "Default",
         soundChannel = "Master",
+        -- TTS / Audio announce: dice el nombre del hechizo X segundos antes del
+        -- trigger. Cadena de fallback en MrtTimeline.lua:
+        --   1) WAV pre-grabado en Sounds/Spells/<lang>/<spellID>.wav
+        --   2) C_VoiceChat.SpeakText (mudo si Vivox no inicia)
+        ttsEnabled = false,
+        ttsLeadTime = 1,     -- segundos antes del trigger en los que se anuncia
+        ttsLanguage = "auto",-- "auto" (segun GetLocale), "esES", o "enUS"
+        ttsVoiceID = 0,      -- voice del SO para fallback TTS; 0 = primer disponible
+        ttsRate = 0,         -- -10..10 (0 = normal); solo aplica a TTS
+        ttsVolume = 100,     -- 0..100; solo aplica a TTS
     },
     -- Ready Check preparation panel: cuando alguien dispara un /readycheck, el
     -- addon muestra un panel flotante con un checklist visual del estado del
@@ -276,9 +296,15 @@ ns.PROFILE_DEFAULTS = {
     readyCheckPanel = {
         enabled = true,
         visibility = "always",       -- "always" | "combat" | "ooc"
+        -- Posicion: si positionUserSet=false anclamos a TOP del UIParent con
+        -- offsetY default (-40). Si el user dragea el panel o el anchor, se
+        -- pasa a "custom" (positionUserSet=true) y usamos offsetX/offsetY
+        -- desde el CENTER del UIParent, como antes. Existing users sin el
+        -- field (nil) caen al default top-center — comportamiento intencional.
+        positionUserSet = false,
         offsetX = 0,
-        offsetY = 200,               -- arriba del centro de la pantalla por default
-        width = 320,                 -- mas ancho para acomodar sub-rows de items con nombre + count
+        offsetY = 200,               -- usado solo cuando positionUserSet=true
+        width = 420,                 -- mas ancho para acomodar sub-rows de items con nombre + count + bumped 2026-05-25 para que el texto del talent loadout "unassigned" no se corte
         rowHeight = 22,
         subRowHeight = 18,           -- alto de los sub-rows que listan items en bag
         opacity = 0.95,
@@ -339,6 +365,10 @@ ns.PROFILE_DEFAULTS = {
         -- sliders — la posicion se setea solo arrastrando el boton.
         offsetX = 0,
         offsetY = -80,
+        -- Posicion del panel "Shopping list" (UIParent CENTER + offsets). Default
+        -- 0,40 cuando ambos son nil; el user los setea arrastrando el panel.
+        panelOffsetX = nil,
+        panelOffsetY = nil,
         -- Lista de items que el user quiere stockpilear. Cada entry:
         --   itemID       — el item
         --   target       — cantidad deseada en bag (default 1)
@@ -361,6 +391,38 @@ ns.PROFILE_DEFAULTS = {
         -- ruidosos. Toggle con:
         --   /run HNZHealingToolsDB.profile.vendorRestock.debug = true
         debug = false,
+    },
+    -- RaidHealerComms: broadcast/receive de spells importantes lanzadas por
+    -- healers en el grupo. Panel separado, posicion arrastrable.
+    raidHealerComms = {
+        enabled = true,
+        offsetX = 200,
+        offsetY = 200,
+        -- Cuando true, el panel se oculta si no hay casts recientes (5s).
+        -- false = siempre visible (con "Esperando casts..." al inicio).
+        hideWhenEmpty = false,
+        -- Por default solo healers ven el panel — un tank/DPS no necesita
+        -- monitorear casts de healers ajenos. El broadcast sigue funcionando
+        -- para todos (cualquier healer que tenga el addon emite); este toggle
+        -- solo controla el RENDER del panel local.
+        showOnlyForHealers = true,
+        -- Por default panel solo en raids. Un party de 5 (M+/dungeon/ciudad)
+        -- no necesita panel multi-healer. Toggle off para verlo en cualquier
+        -- grupo (util si sos healer en M+ con la party pre-armada en ciudad).
+        showOnlyInRaid = true,
+        -- spells = nil hace que el modulo use DEFAULT_TRACKED_SPELLS (curado
+        -- por spec). Cuando agreguemos UI para custom list, se llenara aqui.
+        spells = nil,
+    },
+    -- SimulatedAuras: estado sintetico para auras que la API restringe. Cada
+    -- entry: { spellID, label, initialStacks, duration }. El cast del spell
+    -- (detectado via UNIT_SPELLCAST_SUCCEEDED) aplica los stacks; casts
+    -- subsecuentes consumen 1. Tambien se puede disparar manual via /hnzsim.
+    -- Una vez registrado, el spellID se puede agregar a Cursor/Ring/Pulse
+    -- como cualquier otra aura — AuraMonitor consulta el state simulado.
+    simulatedAuras = {
+        enabled = true,
+        entries = {},
     },
     -- Cursor ring: anillo decorativo siguiendo al raton (estilo CursorRing)
     cursorRing = {
@@ -527,6 +589,8 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
         ns:InitMrtTimeline()
         ns:InitReadyCheckPanel()
         ns:InitVendorRestock()
+        ns:InitRaidHealerComms()
+        ns:InitSimulatedAuras()
         ns:InitConfig()
         ns:InitMinimapButton()
         ns:InitPublicAPI()
