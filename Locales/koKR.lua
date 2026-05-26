@@ -285,4 +285,40 @@ ns.RegisterLocale("koKR", {
         "  • HNZHealingTools.Trigger(key)는 일치한 항목 수를 반환(0 = 해당 키를 가진 항목 없음).",
     ["  • Combat-safe: trigger keys work during combat lockdown."] =
         "  • 전투 안전: 전투 잠금 중에도 트리거 키 작동.",
+
+    -- ===== Raid Spells (Alpha) =====
+    ["Raid Spells"] = "공격대 주문 (A)",
+
+    -- ===== Simulated Auras (Coming Soon) =====
+    ["Simulated Auras"] = "시뮬레이션 효과 (A)",
+    ["Coming soon"] = "출시 예정",
+
+    -- ===== Ready Check Panel — talent loadout content type =====
+    ["Dungeon / M+"] = "던전 / M+",
+    ["No loadout assigned for %s"] = "%s에 할당된 특성 빌드 없음",
+    ["Wrong talent build"] = "잘못된 특성 빌드",
+
+    -- ===== Release 1.9.0 notes =====
+    ["Raid Spells (A): the panel now lists every healer in your raid who has the addon enabled, not just those who cast something in the last 5 seconds. Discovery is automatic via a hello protocol broadcast on group join and every 60s; stale entries are pruned after 3 minutes of silence."] =
+        "공격대 주문 (A): 패널이 이제 최근 5초간 시전한 힐러뿐만 아니라 애드온을 활성화한 공격대의 모든 힐러를 표시합니다. 그룹 참여 시 및 60초마다 hello 프로토콜로 자동 감지하며, 3분간 응답 없는 항목은 제거됩니다.",
+    ["Raid Spells (A): each cast icon now shows a compact age label (5s / 2m / 1h) under it. Replaces the age-based alpha fade — the elapsed time is communicated explicitly."] =
+        "공격대 주문 (A): 각 시전 아이콘 하단에 간결한 시간 라벨(5s / 2m / 1h)이 표시됩니다. 알파 페이드를 대체하여 경과 시간을 명시적으로 표시합니다.",
+    ["Raid Spells (A): panel only shows inside a raid instance by default (it was incorrectly visible in the open world when in a raid group during world events / world bosses)."] =
+        "공격대 주문 (A): 기본적으로 공격대 인스턴스 내에서만 표시됩니다 (월드 이벤트/월드 보스 중 공격대 그룹일 때 야외에서도 잘못 표시되던 문제 수정).",
+    ["Raid Spells (A): drag works correctly — fixed a regression where the 0.5s refresh ticker re-anchored the panel mid-drag and snapped it back to the saved position."] =
+        "공격대 주문 (A): 드래그가 올바르게 작동합니다 — 0.5초 새로 고침 티커가 드래그 중 패널을 다시 고정하던 회귀 버그 수정.",
+    ["Ready Check Panel: talent build row now shows an explicit warning when no loadout is assigned for the current content type (yellow text + red X) instead of a silent neutral state. Configure assignments in Config → Ready Check → Talents."] =
+        "준비 확인 패널: 현재 콘텐츠 유형에 할당된 빌드가 없을 때 특성 빌드 행에 명시적 경고(노란 텍스트 + 빨간 X)가 표시됩니다. 할당은 Config → Ready Check → Talents에서 구성하세요.",
+    ["Ready Check Panel: Dungeon and Mythic+ talent loadout categories merged into a single 'Dungeon / M+' checkbox. The ready check fires in the lobby before the keystone is inserted, so the distinction wasn't useful. Existing 'mplus=true' assignments still work as a synonym for 'dungeon'."] =
+        "준비 확인 패널: 던전과 신화+ 특성 빌드 카테고리가 단일 '던전 / M+' 체크박스로 병합되었습니다. 기존 'mplus=true' 할당은 'dungeon'의 동의어로 계속 작동합니다.",
+    ["Ready Check Panel: default panel width bumped 320 → 420px so the longer status texts (e.g. 'No loadout assigned for Dungeon / M+') no longer get clipped. Slider max raised to 700. Migration v6 auto-bumps profiles still on the old default."] =
+        "준비 확인 패널: 기본 너비를 320 → 420px로 늘려 긴 상태 텍스트가 잘리지 않습니다. 슬라이더 최대값 700으로 상향. 마이그레이션 v6이 이전 기본값의 프로필을 자동 업데이트합니다.",
+    ["Ready Check Panel: removed the 'Use' button from the healthstone cell — healthstones are combat-only and the ready check fires out of combat, so the click did nothing. Icon + count remain to indicate you have stones."] =
+        "준비 확인 패널: 영혼석 셀에서 '사용' 버튼을 제거했습니다 — 영혼석은 전투 전용이고 준비 확인은 비전투 중에 발생하므로 클릭이 동작하지 않았습니다. 아이콘과 개수는 표시됩니다.",
+    ["Ready Check Panel: cauldron-cast Phial aura 1235108 added to the known flask aura list (was reported as missing)."] =
+        "준비 확인 패널: 가마솥 시전 약병 효과 1235108을 알려진 영약 효과 목록에 추가했습니다.",
+    ["Aura tracking: fixed the 'ring stays active after the buff expired' bug for spells with known durations (e.g. Barkskin). When the Cooldown Manager cache has a stale entry whose appliedAt + duration is in the past, we now evict it and report MISSING instead of leaving the ring lit indefinitely. Also clears the CDM cache on zone changes (PLAYER_ENTERING_WORLD full updates)."] =
+        "효과 추적: 알려진 지속시간을 가진 주문(예: 나무가죽)의 '버프 만료 후 링이 활성 상태로 남는' 버그를 수정했습니다. 쿨다운 관리자 캐시의 만료된 항목은 이제 제거되어 MISSING으로 보고됩니다. 지역 변경(PLAYER_ENTERING_WORLD 전체 업데이트) 시 CDM 캐시도 지워집니다.",
+    ["Simulated Auras (A): new sidebar entry, currently 'Coming Soon'. The underlying state machine works via /hnzsim <spellID> and tracks an apply-then-consume aura pattern (for spells whose aura is hidden from the WoW API). UI integration with Cursor/Ring display is still in testing."] =
+        "시뮬레이션 효과 (A): 새 사이드바 항목, 현재 '출시 예정'. 상태 머신은 /hnzsim <spellID>를 통해 작동하며 적용-소모 효과 패턴을 추적합니다. Cursor / Ring 디스플레이와의 UI 통합은 아직 테스트 중입니다.",
 })

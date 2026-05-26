@@ -285,4 +285,40 @@ ns.RegisterLocale("deDE", {
         "  • HNZHealingTools.Trigger(key) gibt die Anzahl übereinstimmender Einträge zurück (0 = kein Eintrag mit diesem Key).",
     ["  • Combat-safe: trigger keys work during combat lockdown."] =
         "  • Kampfsicher: Trigger-Schlüssel funktionieren während Combat Lockdown.",
+
+    -- ===== Raid Spells (Alpha) =====
+    ["Raid Spells"] = "Schlachtzug Zauber (A)",
+
+    -- ===== Simulated Auras (Coming Soon) =====
+    ["Simulated Auras"] = "Simulierte Auren (A)",
+    ["Coming soon"] = "Demnächst",
+
+    -- ===== Ready Check Panel — talent loadout content type =====
+    ["Dungeon / M+"] = "Dungeon / M+",
+    ["No loadout assigned for %s"] = "Keine Talentauswahl zugewiesen für %s",
+    ["Wrong talent build"] = "Falsche Talentauswahl",
+
+    -- ===== Release 1.9.0 notes =====
+    ["Raid Spells (A): the panel now lists every healer in your raid who has the addon enabled, not just those who cast something in the last 5 seconds. Discovery is automatic via a hello protocol broadcast on group join and every 60s; stale entries are pruned after 3 minutes of silence."] =
+        "Schlachtzug Zauber (A): Das Panel listet jetzt jeden Heiler im Schlachtzug auf, der das Addon aktiviert hat — nicht nur jene, die in den letzten 5 Sekunden gewirkt haben. Die Erkennung erfolgt automatisch via Hello-Broadcast beim Gruppenbeitritt und alle 60 Sekunden; veraltete Einträge werden nach 3 Minuten Stille entfernt.",
+    ["Raid Spells (A): each cast icon now shows a compact age label (5s / 2m / 1h) under it. Replaces the age-based alpha fade — the elapsed time is communicated explicitly."] =
+        "Schlachtzug Zauber (A): Jedes Zaubersymbol zeigt jetzt ein kompaktes Alterskennzeichen (5s / 2m / 1h) darunter. Ersetzt das altersbasierte Alpha-Ausblenden — die verstrichene Zeit wird explizit angezeigt.",
+    ["Raid Spells (A): panel only shows inside a raid instance by default (it was incorrectly visible in the open world when in a raid group during world events / world bosses)."] =
+        "Schlachtzug Zauber (A): Das Panel ist standardmäßig nur innerhalb einer Schlachtzug-Instanz sichtbar (es wurde fälschlich in der offenen Welt angezeigt, wenn man in einer Schlachtzuggruppe bei Welt-Events / Weltbossen war).",
+    ["Raid Spells (A): drag works correctly — fixed a regression where the 0.5s refresh ticker re-anchored the panel mid-drag and snapped it back to the saved position."] =
+        "Schlachtzug Zauber (A): Ziehen funktioniert wieder korrekt — ein Regressionsfehler, bei dem der 0,5s-Refresh-Ticker das Panel während des Ziehens neu verankerte, wurde behoben.",
+    ["Ready Check Panel: talent build row now shows an explicit warning when no loadout is assigned for the current content type (yellow text + red X) instead of a silent neutral state. Configure assignments in Config → Ready Check → Talents."] =
+        "Bereitschaftsprüfungs-Panel: Die Talentauswahl-Zeile zeigt jetzt eine explizite Warnung (gelber Text + rotes X), wenn für den aktuellen Inhaltstyp keine Talentauswahl zugewiesen ist, statt eines stillen neutralen Zustands. Zuweisungen unter Config → Bereitschaftsprüfung → Talente.",
+    ["Ready Check Panel: Dungeon and Mythic+ talent loadout categories merged into a single 'Dungeon / M+' checkbox. The ready check fires in the lobby before the keystone is inserted, so the distinction wasn't useful. Existing 'mplus=true' assignments still work as a synonym for 'dungeon'."] =
+        "Bereitschaftsprüfungs-Panel: Die Talentauswahl-Kategorien Dungeon und Mythisch+ wurden zu einer einzigen Checkbox „Dungeon / M+\" zusammengefügt. Die Bereitschaftsprüfung erfolgt in der Lobby bevor der Schlüsselstein eingesetzt wird, daher war die Unterscheidung nicht hilfreich. Bestehende „mplus=true\"-Zuweisungen funktionieren weiterhin als Synonym für „dungeon\".",
+    ["Ready Check Panel: default panel width bumped 320 → 420px so the longer status texts (e.g. 'No loadout assigned for Dungeon / M+') no longer get clipped. Slider max raised to 700. Migration v6 auto-bumps profiles still on the old default."] =
+        "Bereitschaftsprüfungs-Panel: Standardbreite von 320 → 420px erhöht, damit längere Statustexte (z. B. „Keine Talentauswahl zugewiesen für Dungeon / M+\") nicht abgeschnitten werden. Schieberegler-Maximum auf 700 erhöht. Migration v6 aktualisiert Profile automatisch, die noch auf dem alten Standard sind.",
+    ["Ready Check Panel: removed the 'Use' button from the healthstone cell — healthstones are combat-only and the ready check fires out of combat, so the click did nothing. Icon + count remain to indicate you have stones."] =
+        "Bereitschaftsprüfungs-Panel: Der „Benutzen\"-Button beim Gesundheitsstein wurde entfernt — Gesundheitssteine sind kampfgebunden und die Bereitschaftsprüfung erfolgt außerhalb des Kampfes, daher bewirkte der Klick nichts. Symbol + Anzahl bleiben sichtbar.",
+    ["Ready Check Panel: cauldron-cast Phial aura 1235108 added to the known flask aura list (was reported as missing)."] =
+        "Bereitschaftsprüfungs-Panel: Die Phiolen-Aura 1235108 (Kessel) wurde der Liste bekannter Flakon-Auren hinzugefügt.",
+    ["Aura tracking: fixed the 'ring stays active after the buff expired' bug for spells with known durations (e.g. Barkskin). When the Cooldown Manager cache has a stale entry whose appliedAt + duration is in the past, we now evict it and report MISSING instead of leaving the ring lit indefinitely. Also clears the CDM cache on zone changes (PLAYER_ENTERING_WORLD full updates)."] =
+        "Auren-Verfolgung: Behoben — der Bug „Ring bleibt aktiv nachdem der Buff abgelaufen ist\" bei Zaubern mit bekannter Dauer (z. B. Baumrinde). Wenn der Cooldown-Manager-Cache einen veralteten Eintrag hat, dessen appliedAt + duration in der Vergangenheit liegt, wird er jetzt entfernt und MISSING gemeldet. Der CDM-Cache wird zudem bei Zonenwechseln (PLAYER_ENTERING_WORLD Full Updates) geleert.",
+    ["Simulated Auras (A): new sidebar entry, currently 'Coming Soon'. The underlying state machine works via /hnzsim <spellID> and tracks an apply-then-consume aura pattern (for spells whose aura is hidden from the WoW API). UI integration with Cursor/Ring display is still in testing."] =
+        "Simulierte Auren (A): Neuer Seitenleisten-Eintrag, derzeit „Demnächst\". Die zugrunde liegende Zustandsmaschine funktioniert via /hnzsim <spellID> und verfolgt ein Apply-then-Consume-Aura-Muster. Die UI-Integration mit Cursor-/Ring-Anzeige wird noch getestet.",
 })

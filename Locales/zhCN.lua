@@ -285,4 +285,40 @@ ns.RegisterLocale("zhCN", {
         "  • HNZHealingTools.Trigger(key) 返回匹配的条目数（0 = 没有条目拥有该键）。",
     ["  • Combat-safe: trigger keys work during combat lockdown."] =
         "  • 战斗安全：触发键在战斗锁定期间也可使用。",
+
+    -- ===== Raid Spells (Alpha) =====
+    ["Raid Spells"] = "团队法术 (A)",
+
+    -- ===== Simulated Auras (Coming Soon) =====
+    ["Simulated Auras"] = "模拟光环 (A)",
+    ["Coming soon"] = "即将推出",
+
+    -- ===== Ready Check Panel — talent loadout content type =====
+    ["Dungeon / M+"] = "地下城 / M+",
+    ["No loadout assigned for %s"] = "未为 %s 分配天赋方案",
+    ["Wrong talent build"] = "错误的天赋方案",
+
+    -- ===== Release 1.9.0 notes =====
+    ["Raid Spells (A): the panel now lists every healer in your raid who has the addon enabled, not just those who cast something in the last 5 seconds. Discovery is automatic via a hello protocol broadcast on group join and every 60s; stale entries are pruned after 3 minutes of silence."] =
+        "团队法术 (A): 面板现在列出团队中启用插件的所有治疗者，而不仅仅是最近 5 秒内施法的治疗者。通过加入组时和每 60 秒广播的 hello 协议自动发现; 3 分钟无响应的条目将被清除。",
+    ["Raid Spells (A): each cast icon now shows a compact age label (5s / 2m / 1h) under it. Replaces the age-based alpha fade — the elapsed time is communicated explicitly."] =
+        "团队法术 (A): 每个施法图标下方现在显示紧凑的时间标签 (5s / 2m / 1h)。替代基于年龄的透明度淡出 — 经过时间显式显示。",
+    ["Raid Spells (A): panel only shows inside a raid instance by default (it was incorrectly visible in the open world when in a raid group during world events / world bosses)."] =
+        "团队法术 (A): 面板默认仅在团队副本内显示 (在世界活动 / 世界 BOSS 时位于团队队伍中时，曾错误地在开放世界显示)。",
+    ["Raid Spells (A): drag works correctly — fixed a regression where the 0.5s refresh ticker re-anchored the panel mid-drag and snapped it back to the saved position."] =
+        "团队法术 (A): 拖动现在正常工作 — 修复了 0.5 秒刷新计时器在拖动中重新锚定面板的回归错误。",
+    ["Ready Check Panel: talent build row now shows an explicit warning when no loadout is assigned for the current content type (yellow text + red X) instead of a silent neutral state. Configure assignments in Config → Ready Check → Talents."] =
+        "准备就绪面板: 当当前内容类型未分配天赋方案时, 天赋方案行现在显示明确警告 (黄色文字 + 红 X), 而不是静默中性状态。在 Config → Ready Check → Talents 中配置分配。",
+    ["Ready Check Panel: Dungeon and Mythic+ talent loadout categories merged into a single 'Dungeon / M+' checkbox. The ready check fires in the lobby before the keystone is inserted, so the distinction wasn't useful. Existing 'mplus=true' assignments still work as a synonym for 'dungeon'."] =
+        "准备就绪面板: 地下城和史诗+天赋方案类别合并为单一 '地下城 / M+' 复选框。现有 'mplus=true' 分配继续作为 'dungeon' 的同义词使用。",
+    ["Ready Check Panel: default panel width bumped 320 → 420px so the longer status texts (e.g. 'No loadout assigned for Dungeon / M+') no longer get clipped. Slider max raised to 700. Migration v6 auto-bumps profiles still on the old default."] =
+        "准备就绪面板: 默认宽度从 320 提升至 420px, 使较长的状态文本不再被裁剪。滑块最大值提升至 700。迁移 v6 自动更新仍使用旧默认值的配置文件。",
+    ["Ready Check Panel: removed the 'Use' button from the healthstone cell — healthstones are combat-only and the ready check fires out of combat, so the click did nothing. Icon + count remain to indicate you have stones."] =
+        "准备就绪面板: 移除了治疗石格子上的 '使用' 按钮 — 治疗石仅战斗中可用, 而准备就绪在战斗外触发。图标和数量保留以指示你拥有治疗石。",
+    ["Ready Check Panel: cauldron-cast Phial aura 1235108 added to the known flask aura list (was reported as missing)."] =
+        "准备就绪面板: 大锅施法的小瓶光环 1235108 已添加到已知合剂光环列表。",
+    ["Aura tracking: fixed the 'ring stays active after the buff expired' bug for spells with known durations (e.g. Barkskin). When the Cooldown Manager cache has a stale entry whose appliedAt + duration is in the past, we now evict it and report MISSING instead of leaving the ring lit indefinitely. Also clears the CDM cache on zone changes (PLAYER_ENTERING_WORLD full updates)."] =
+        "光环追踪: 修复了已知持续时间法术 (如树皮术) 的 '增益过期后光环仍激活' 错误。当冷却管理器缓存中存在 appliedAt + duration 已过去的过期条目时, 现在会驱逐并报告为 MISSING。区域切换时 (PLAYER_ENTERING_WORLD 全量更新) 也清除 CDM 缓存。",
+    ["Simulated Auras (A): new sidebar entry, currently 'Coming Soon'. The underlying state machine works via /hnzsim <spellID> and tracks an apply-then-consume aura pattern (for spells whose aura is hidden from the WoW API). UI integration with Cursor/Ring display is still in testing."] =
+        "模拟光环 (A): 新侧边栏条目, 目前为 '即将推出'。底层状态机通过 /hnzsim <spellID> 工作, 追踪应用-然后-消耗的光环模式。Cursor / Ring 显示的 UI 集成仍在测试中。",
 })

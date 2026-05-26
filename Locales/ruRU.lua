@@ -285,4 +285,40 @@ ns.RegisterLocale("ruRU", {
         "  • HNZHealingTools.Trigger(key) возвращает количество совпавших записей (0 = ни одна запись не имеет такого ключа).",
     ["  • Combat-safe: trigger keys work during combat lockdown."] =
         "  • Безопасно в бою: ключи триггера работают во время combat lockdown.",
+
+    -- ===== Raid Spells (Alpha) =====
+    ["Raid Spells"] = "Рейд Заклинания (A)",
+
+    -- ===== Simulated Auras (Coming Soon) =====
+    ["Simulated Auras"] = "Симулированные ауры (A)",
+    ["Coming soon"] = "Скоро",
+
+    -- ===== Ready Check Panel — talent loadout content type =====
+    ["Dungeon / M+"] = "Подземелье / M+",
+    ["No loadout assigned for %s"] = "Билд талантов не назначен для %s",
+    ["Wrong talent build"] = "Неверный билд талантов",
+
+    -- ===== Release 1.9.0 notes =====
+    ["Raid Spells (A): the panel now lists every healer in your raid who has the addon enabled, not just those who cast something in the last 5 seconds. Discovery is automatic via a hello protocol broadcast on group join and every 60s; stale entries are pruned after 3 minutes of silence."] =
+        "Рейд Заклинания (A): панель теперь показывает всех целителей рейда с включенным аддоном, а не только тех, кто кастовал что-то в последние 5 секунд. Обнаружение автоматическое через hello-протокол при входе в группу и каждые 60 секунд; устаревшие записи удаляются после 3 минут молчания.",
+    ["Raid Spells (A): each cast icon now shows a compact age label (5s / 2m / 1h) under it. Replaces the age-based alpha fade — the elapsed time is communicated explicitly."] =
+        "Рейд Заклинания (A): под каждой иконкой каста теперь показывается компактная метка времени (5s / 2m / 1h). Заменяет угасание по альфе — прошедшее время показывается явно.",
+    ["Raid Spells (A): panel only shows inside a raid instance by default (it was incorrectly visible in the open world when in a raid group during world events / world bosses)."] =
+        "Рейд Заклинания (A): по умолчанию панель показывается только внутри рейдового подземелья (была некорректно видна в открытом мире, когда вы в рейд-группе во время мировых событий / мировых боссов).",
+    ["Raid Spells (A): drag works correctly — fixed a regression where the 0.5s refresh ticker re-anchored the panel mid-drag and snapped it back to the saved position."] =
+        "Рейд Заклинания (A): перетаскивание работает корректно — исправлена регрессия, когда таймер обновления 0.5s переанкорировал панель во время перетаскивания.",
+    ["Ready Check Panel: talent build row now shows an explicit warning when no loadout is assigned for the current content type (yellow text + red X) instead of a silent neutral state. Configure assignments in Config → Ready Check → Talents."] =
+        "Панель Ready Check: строка билда талантов теперь показывает явное предупреждение (жёлтый текст + красный X), когда для текущего типа контента не назначен билд. Настройте назначения в Config → Ready Check → Talents.",
+    ["Ready Check Panel: Dungeon and Mythic+ talent loadout categories merged into a single 'Dungeon / M+' checkbox. The ready check fires in the lobby before the keystone is inserted, so the distinction wasn't useful. Existing 'mplus=true' assignments still work as a synonym for 'dungeon'."] =
+        "Панель Ready Check: категории билдов Подземелье и Мифик+ объединены в один чекбокс 'Подземелье / M+'. Существующие назначения 'mplus=true' продолжают работать как синоним 'dungeon'.",
+    ["Ready Check Panel: default panel width bumped 320 → 420px so the longer status texts (e.g. 'No loadout assigned for Dungeon / M+') no longer get clipped. Slider max raised to 700. Migration v6 auto-bumps profiles still on the old default."] =
+        "Панель Ready Check: ширина по умолчанию увеличена с 320 до 420px, чтобы более длинные статусы не обрезались. Максимум слайдера поднят до 700. Миграция v6 автоматически обновляет профили со старым значением.",
+    ["Ready Check Panel: removed the 'Use' button from the healthstone cell — healthstones are combat-only and the ready check fires out of combat, so the click did nothing. Icon + count remain to indicate you have stones."] =
+        "Панель Ready Check: убрана кнопка 'Использовать' у камня здоровья — камни здоровья работают только в бою, а Ready Check срабатывает вне боя. Иконка и счётчик остаются для индикации.",
+    ["Ready Check Panel: cauldron-cast Phial aura 1235108 added to the known flask aura list (was reported as missing)."] =
+        "Панель Ready Check: аура флакона 1235108 (котёл) добавлена в список известных аур флаконов.",
+    ["Aura tracking: fixed the 'ring stays active after the buff expired' bug for spells with known durations (e.g. Barkskin). When the Cooldown Manager cache has a stale entry whose appliedAt + duration is in the past, we now evict it and report MISSING instead of leaving the ring lit indefinitely. Also clears the CDM cache on zone changes (PLAYER_ENTERING_WORLD full updates)."] =
+        "Отслеживание аур: исправлен баг 'кольцо остаётся активным после истечения баффа' для заклинаний с известной длительностью (напр. Дубовая кожа). Когда кеш Cooldown Manager содержит устаревшую запись с appliedAt + duration в прошлом, она удаляется и статус сообщается как MISSING. Кеш CDM также очищается при смене зоны.",
+    ["Simulated Auras (A): new sidebar entry, currently 'Coming Soon'. The underlying state machine works via /hnzsim <spellID> and tracks an apply-then-consume aura pattern (for spells whose aura is hidden from the WoW API). UI integration with Cursor/Ring display is still in testing."] =
+        "Симулированные ауры (A): новый пункт в боковой панели, сейчас 'Скоро'. Машина состояний работает через /hnzsim <spellID> и отслеживает паттерн применить-затем-потребить. Интеграция UI с Cursor / Ring ещё тестируется.",
 })

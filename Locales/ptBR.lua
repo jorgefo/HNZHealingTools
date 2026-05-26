@@ -285,4 +285,40 @@ ns.RegisterLocale("ptBR", {
         "  • HNZHealingTools.Trigger(key) retorna a quantidade de entradas que combinaram (0 = nenhuma entrada tem essa chave).",
     ["  • Combat-safe: trigger keys work during combat lockdown."] =
         "  • Combat-safe: chaves de gatilho funcionam durante combat lockdown.",
+
+    -- ===== Raid Spells (Alpha) =====
+    ["Raid Spells"] = "Raide Magias (A)",
+
+    -- ===== Simulated Auras (Coming Soon) =====
+    ["Simulated Auras"] = "Auras simuladas (A)",
+    ["Coming soon"] = "Em breve",
+
+    -- ===== Ready Check Panel — talent loadout content type =====
+    ["Dungeon / M+"] = "Masmorra / M+",
+    ["No loadout assigned for %s"] = "Sem loadout atribuído para %s",
+    ["Wrong talent build"] = "Build de talentos incorreto",
+
+    -- ===== Release 1.9.0 notes =====
+    ["Raid Spells (A): the panel now lists every healer in your raid who has the addon enabled, not just those who cast something in the last 5 seconds. Discovery is automatic via a hello protocol broadcast on group join and every 60s; stale entries are pruned after 3 minutes of silence."] =
+        "Raide Magias (A): o painel agora lista todos os curandeiros do raide que têm o addon ativado, não apenas os que conjuraram algo nos últimos 5 segundos. A descoberta é automática via um protocolo hello transmitido ao entrar no grupo e a cada 60s; entradas obsoletas são removidas após 3 minutos de silêncio.",
+    ["Raid Spells (A): each cast icon now shows a compact age label (5s / 2m / 1h) under it. Replaces the age-based alpha fade — the elapsed time is communicated explicitly."] =
+        "Raide Magias (A): cada ícone de magia agora mostra uma etiqueta de tempo compacta (5s / 2m / 1h) abaixo. Substitui o fade alpha baseado em idade — o tempo decorrido é mostrado explicitamente.",
+    ["Raid Spells (A): panel only shows inside a raid instance by default (it was incorrectly visible in the open world when in a raid group during world events / world bosses)."] =
+        "Raide Magias (A): o painel só aparece dentro de uma instância de raide por padrão (era incorretamente visível no mundo aberto quando em grupo de raide durante eventos mundiais / chefes mundiais).",
+    ["Raid Spells (A): drag works correctly — fixed a regression where the 0.5s refresh ticker re-anchored the panel mid-drag and snapped it back to the saved position."] =
+        "Raide Magias (A): arrastar funciona corretamente — corrigida uma regressão onde o ticker de atualização de 0,5s reancorava o painel durante o arrasto.",
+    ["Ready Check Panel: talent build row now shows an explicit warning when no loadout is assigned for the current content type (yellow text + red X) instead of a silent neutral state. Configure assignments in Config → Ready Check → Talents."] =
+        "Painel Ready Check: a linha de build de talentos agora mostra um aviso explícito (texto amarelo + X vermelho) quando nenhum loadout está atribuído ao tipo de conteúdo atual. Configure as atribuições em Config → Ready Check → Talents.",
+    ["Ready Check Panel: Dungeon and Mythic+ talent loadout categories merged into a single 'Dungeon / M+' checkbox. The ready check fires in the lobby before the keystone is inserted, so the distinction wasn't useful. Existing 'mplus=true' assignments still work as a synonym for 'dungeon'."] =
+        "Painel Ready Check: as categorias de loadout Masmorra e Mítica+ foram fundidas em uma única caixa 'Masmorra / M+'. As atribuições 'mplus=true' existentes continuam funcionando como sinônimo de 'dungeon'.",
+    ["Ready Check Panel: default panel width bumped 320 → 420px so the longer status texts (e.g. 'No loadout assigned for Dungeon / M+') no longer get clipped. Slider max raised to 700. Migration v6 auto-bumps profiles still on the old default."] =
+        "Painel Ready Check: largura padrão aumentada de 320 → 420px para que textos de status mais longos não sejam cortados. Máximo do controle deslizante aumentado para 700. A migração v6 atualiza automaticamente perfis ainda no padrão antigo.",
+    ["Ready Check Panel: removed the 'Use' button from the healthstone cell — healthstones are combat-only and the ready check fires out of combat, so the click did nothing. Icon + count remain to indicate you have stones."] =
+        "Painel Ready Check: removido o botão 'Usar' da célula da pedra de saúde — pedras de saúde só funcionam em combate e o ready check ocorre fora de combate. Ícone + contador permanecem para indicar que você as possui.",
+    ["Ready Check Panel: cauldron-cast Phial aura 1235108 added to the known flask aura list (was reported as missing)."] =
+        "Painel Ready Check: a aura de frasco 1235108 (caldeirão) foi adicionada à lista de auras de frascos conhecidos.",
+    ["Aura tracking: fixed the 'ring stays active after the buff expired' bug for spells with known durations (e.g. Barkskin). When the Cooldown Manager cache has a stale entry whose appliedAt + duration is in the past, we now evict it and report MISSING instead of leaving the ring lit indefinitely. Also clears the CDM cache on zone changes (PLAYER_ENTERING_WORLD full updates)."] =
+        "Rastreamento de auras: corrigido o bug 'o anel permanece ativo após o buff expirar' para magias com durações conhecidas (ex. Pele de Casca). Quando o cache do Cooldown Manager tem uma entrada obsoleta cujo appliedAt + duration está no passado, ela agora é removida e reportada como MISSING. O cache CDM também é limpo em mudanças de zona.",
+    ["Simulated Auras (A): new sidebar entry, currently 'Coming Soon'. The underlying state machine works via /hnzsim <spellID> and tracks an apply-then-consume aura pattern (for spells whose aura is hidden from the WoW API). UI integration with Cursor/Ring display is still in testing."] =
+        "Auras simuladas (A): nova entrada na barra lateral, atualmente 'Em breve'. A máquina de estados funciona via /hnzsim <spellID> e rastreia um padrão de aura aplicar-então-consumir. A integração com a tela Cursor / Anel ainda está em testes.",
 })

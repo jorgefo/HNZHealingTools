@@ -285,4 +285,40 @@ ns.RegisterLocale("frFR", {
         "  • HNZHealingTools.Trigger(key) renvoie le nombre d'entrées correspondantes (0 = aucune entrée n'a cette clé).",
     ["  • Combat-safe: trigger keys work during combat lockdown."] =
         "  • Combat-safe : les clés de déclenchement fonctionnent pendant le combat lockdown.",
+
+    -- ===== Raid Spells (Alpha) =====
+    ["Raid Spells"] = "Raid Sorts (A)",
+
+    -- ===== Simulated Auras (Coming Soon) =====
+    ["Simulated Auras"] = "Auras simulées (A)",
+    ["Coming soon"] = "Bientôt disponible",
+
+    -- ===== Ready Check Panel — talent loadout content type =====
+    ["Dungeon / M+"] = "Donjon / M+",
+    ["No loadout assigned for %s"] = "Aucun build assigné pour %s",
+    ["Wrong talent build"] = "Mauvais build de talents",
+
+    -- ===== Release 1.9.0 notes =====
+    ["Raid Spells (A): the panel now lists every healer in your raid who has the addon enabled, not just those who cast something in the last 5 seconds. Discovery is automatic via a hello protocol broadcast on group join and every 60s; stale entries are pruned after 3 minutes of silence."] =
+        "Raid Sorts (A) : le panneau liste désormais tous les soigneurs du raid qui ont l'addon activé — pas seulement ceux qui ont lancé un sort dans les 5 dernières secondes. La détection est automatique via un protocole hello diffusé à l'entrée en groupe et toutes les 60s ; les entrées obsolètes sont purgées après 3 minutes de silence.",
+    ["Raid Spells (A): each cast icon now shows a compact age label (5s / 2m / 1h) under it. Replaces the age-based alpha fade — the elapsed time is communicated explicitly."] =
+        "Raid Sorts (A) : chaque icône de sort affiche maintenant une étiquette d'âge compacte (5s / 2m / 1h) en dessous. Remplace le fondu alpha basé sur l'âge — le temps écoulé est indiqué explicitement.",
+    ["Raid Spells (A): panel only shows inside a raid instance by default (it was incorrectly visible in the open world when in a raid group during world events / world bosses)."] =
+        "Raid Sorts (A) : le panneau ne s'affiche que dans une instance de raid par défaut (il était incorrectement visible en monde ouvert quand on était en groupe de raid lors d'événements / boss du monde).",
+    ["Raid Spells (A): drag works correctly — fixed a regression where the 0.5s refresh ticker re-anchored the panel mid-drag and snapped it back to the saved position."] =
+        "Raid Sorts (A) : le déplacement fonctionne correctement — correction d'une régression où le ticker de rafraîchissement de 0,5s réancrait le panneau pendant le déplacement.",
+    ["Ready Check Panel: talent build row now shows an explicit warning when no loadout is assigned for the current content type (yellow text + red X) instead of a silent neutral state. Configure assignments in Config → Ready Check → Talents."] =
+        "Panneau Ready Check : la ligne du build de talents affiche maintenant un avertissement explicite (texte jaune + X rouge) quand aucun build n'est assigné au type de contenu actuel. Configurez les assignations dans Config → Ready Check → Talents.",
+    ["Ready Check Panel: Dungeon and Mythic+ talent loadout categories merged into a single 'Dungeon / M+' checkbox. The ready check fires in the lobby before the keystone is inserted, so the distinction wasn't useful. Existing 'mplus=true' assignments still work as a synonym for 'dungeon'."] =
+        "Panneau Ready Check : les catégories de build Donjon et Mythique+ ont été fusionnées en une seule case « Donjon / M+ ». Le ready check se déclenche dans le lobby avant l'insertion de la keystone, donc la distinction n'était pas utile. Les assignations existantes « mplus=true » continuent de fonctionner comme synonyme de « dungeon ».",
+    ["Ready Check Panel: default panel width bumped 320 → 420px so the longer status texts (e.g. 'No loadout assigned for Dungeon / M+') no longer get clipped. Slider max raised to 700. Migration v6 auto-bumps profiles still on the old default."] =
+        "Panneau Ready Check : largeur par défaut augmentée de 320 → 420px pour que les textes de statut plus longs ne soient plus coupés. Maximum du curseur porté à 700. La migration v6 met à jour automatiquement les profils encore sur l'ancienne valeur par défaut.",
+    ["Ready Check Panel: removed the 'Use' button from the healthstone cell — healthstones are combat-only and the ready check fires out of combat, so the click did nothing. Icon + count remain to indicate you have stones."] =
+        "Panneau Ready Check : suppression du bouton « Utiliser » de la cellule de la pierre de soins — les pierres de soins sont en combat uniquement et le ready check se déclenche hors combat, donc le clic ne faisait rien. L'icône + le compteur restent pour indiquer que vous en avez.",
+    ["Ready Check Panel: cauldron-cast Phial aura 1235108 added to the known flask aura list (was reported as missing)."] =
+        "Panneau Ready Check : l'aura de Fiole 1235108 (chaudron) a été ajoutée à la liste des auras de flacons connues.",
+    ["Aura tracking: fixed the 'ring stays active after the buff expired' bug for spells with known durations (e.g. Barkskin). When the Cooldown Manager cache has a stale entry whose appliedAt + duration is in the past, we now evict it and report MISSING instead of leaving the ring lit indefinitely. Also clears the CDM cache on zone changes (PLAYER_ENTERING_WORLD full updates)."] =
+        "Suivi des auras : correction du bug « l'anneau reste actif après l'expiration du buff » pour les sorts à durée connue (ex. Peau d'écorce). Quand le cache du Cooldown Manager a une entrée obsolète dont appliedAt + duration est dans le passé, nous l'éjectons et reportons MISSING. Le cache CDM est aussi vidé lors des changements de zone (PLAYER_ENTERING_WORLD full updates).",
+    ["Simulated Auras (A): new sidebar entry, currently 'Coming Soon'. The underlying state machine works via /hnzsim <spellID> and tracks an apply-then-consume aura pattern (for spells whose aura is hidden from the WoW API). UI integration with Cursor/Ring display is still in testing."] =
+        "Auras simulées (A) : nouvelle entrée dans la barre latérale, actuellement « Bientôt disponible ». La machine à états sous-jacente fonctionne via /hnzsim <spellID> et suit un schéma d'aura apply-then-consume. L'intégration UI avec l'affichage Cursor / Ring est encore en test.",
 })
