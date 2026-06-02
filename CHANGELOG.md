@@ -8,6 +8,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ---
 
+## [1.10.1] — 2026-06-01
+
+- **Hotfix**: bundle the pre-recorded TTS voice files (`Sounds/`) in the package. They were untracked and therefore missing from the published zip, so MRT/NSRT spell announcements fell back to live TTS (Vivox/SAPI) — which fails on many installs. The 20 enUS + 20 esES spell-name clips now ship with the addon.
+
+---
+
 ## [1.10.0] — 2026-06-01
 
 - **Miscellaneous**: new "Misc" sidebar section for small utilities. First feature: a **Combat Resurrection tracker** showing the group's shared battle-res charges in raids and Mythic+ — it works on any class (it does not depend on you having a brez spell). Shows the available count, or dims and counts down to the next charge when empty. **Shamans** also get a companion **Reincarnation** indicator (bright when ready, or a countdown to the next self-res).

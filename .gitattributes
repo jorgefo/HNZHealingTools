@@ -1,0 +1,2 @@
+# Audio assets are binary — never apply text/EOL normalization to them.
+*.wav binary

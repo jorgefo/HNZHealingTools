@@ -21,6 +21,13 @@ local addonName, ns = ...
 local function GetReleaseNotes()
     return {
         {
+            version = "1.10.1",
+            date = "2026-06-01",
+            items = {
+                ns.L["Hotfix: the pre-recorded voice files for MRT/NSRT spell announcements are now bundled with the addon (they were missing from the package), so the audio reminders work without relying on the in-game TTS engine."],
+            },
+        },
+        {
             version = "1.10.0",
             date = "2026-06-01",
             items = {
