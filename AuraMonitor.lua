@@ -466,11 +466,22 @@ end
 local function ProcessAuraUpdate(unit, updateInfo)
     if updateInfo.isFullUpdate then
         CacheClearUnit(unit)
-        -- En isFullUpdate (zone change, login, /reload mid-buff) no llega
-        -- removedAuraInstanceIDs — clear cdmData del unit para que entries stale
-        -- no sobrevivan. ScanCdmViewers + CaptureCdmFrameState repopulan las
-        -- entries que sigan vivas en los frames de Blizzard en el siguiente tick.
-        cdmData[unit] = nil
+        -- En isFullUpdate REAL (evento UNIT_AURA de Blizzard: zone change, login,
+        -- /reload mid-buff) no llega removedAuraInstanceIDs — clear cdmData del
+        -- unit para que entries stale no sobrevivan. ScanCdmViewers +
+        -- CaptureCdmFrameState repopulan las entries que sigan vivas en los frames
+        -- de Blizzard en el siguiente tick.
+        --
+        -- PERO los full-scans SINTETICOS (periodic 0.5s + RevalidateAllAuras en
+        -- combat in/out) pasan keepCdm=true: NO deben tocar cdmData. Wipearla
+        -- descarta el appliedAt original y CaptureCdmFrameState lo re-estampa a
+        -- GetTime(), reseteando el timing basado en timestamp. En combate (donde
+        -- duration/expirationTime llegan como SecureNumber y el unico timing
+        -- disponible es appliedAt + manualDuration) eso hace que el anillo salte
+        -- al inicio cada 0.5s y al entrar en combate — el sintoma "avanza un punto
+        -- y vuelve a resetearse en loop". El comentario de RevalidateAllAuras ya
+        -- declara que cdmData NO se debe limpiar ahi; este flag lo hace cumplir.
+        if not updateInfo.keepCdm then cdmData[unit] = nil end
         if AuraUtil and AuraUtil.ForEachAura then
             local idSet, nameSet = GetTrackedSets()
             local function visit(auraData)
@@ -813,17 +824,17 @@ local function HandleCleu()
     end
 end
 
-local function FullScanUnit(unit)
+local function FullScanUnit(unit, keepCdm)
     if unit and UnitExists(unit) then
-        ProcessAuraUpdate(unit, { isFullUpdate = true })
+        ProcessAuraUpdate(unit, { isFullUpdate = true, keepCdm = keepCdm })
     end
 end
 
-local function FullScanAll()
-    FullScanUnit("player")
-    FullScanUnit("target")
-    FullScanUnit("focus")
-    FullScanUnit("mouseover")
+local function FullScanAll(keepCdm)
+    FullScanUnit("player", keepCdm)
+    FullScanUnit("target", keepCdm)
+    FullScanUnit("focus", keepCdm)
+    FullScanUnit("mouseover", keepCdm)
 end
 
 -- ============================================================
@@ -851,7 +862,7 @@ local function RevalidateAllAuras()
     wipe(auraCache)
     wipe(auraCacheByName)
     wipe(cleuAuras)
-    FullScanAll()
+    FullScanAll(true) -- keepCdm: preservar appliedAt; wipear cdmData aqui resetea el timing en combate
     ns:MarkAuraDirty()
 end
 
@@ -898,7 +909,7 @@ function ns:InitAuraMonitor()
         scanElapsed = scanElapsed + elapsed
         if scanElapsed >= 0.5 then
             scanElapsed = 0
-            FullScanAll()
+            FullScanAll(true) -- keepCdm: el scan periodico NO debe wipear cdmData (resetearia appliedAt cada 0.5s)
             ScanCdmViewers()
         end
     end)
@@ -1395,10 +1406,20 @@ function ns:GetAuraStatus(spellID, unit, filter, manualDuration)
     end
 
     -- Manual trigger fallback: ultima oportunidad para auras "fully restricted"
-    -- en Midnight (item buffs, efectos secret) que ningun path detecta. Si el
-    -- usuario configuro un trigger spell/item en el editor, usamos el timestamp
-    -- del ultimo cast/uso del trigger para sintetizar el estado ACTIVE. Solo
-    -- entra cuando MISSING (no pisa una deteccion real).
+    -- en Midnight (item buffs, efectos secret). Si el usuario configuro un
+    -- trigger spell/item en el editor, usamos el timestamp del ultimo cast/uso
+    -- del trigger para llenar timing.
+    --
+    -- Dos modos:
+    --   (a) status == MISSING: sintetizamos ACTIVE completo (path original —
+    --       la aura no aparece en ningun API pero el trigger se disparo).
+    --   (b) status == ACTIVE pero remaining/duration == 0: la aura SI fue
+    --       detectada por FindAuraBySpellID, pero los valores son SecureNumber
+    --       y todos los probes (cdmInfo, GetAuraDuration, GetStartTime) fallaron.
+    --       Conservamos la deteccion real y solo rellenamos los campos vacios
+    --       desde el timestamp del trigger. Sin esto el ring queda pegado en 1.0
+    --       y al primer flicker ACTIVE→MISSING resetea el `_manualStart` local
+    --       del display, dando el sintoma "avanza un punto y vuelve a resetearse".
     --
     -- Duration source priority:
     --   1. manualDuration (user-configured en el editor)
@@ -1408,7 +1429,9 @@ function ns:GetAuraStatus(spellID, unit, filter, manualDuration)
     --      primera vez que el usuario las castea fuera de combate aprendemos la
     --      duracion, y de ahi en adelante el manual trigger las sintetiza correctamente
     --      en combate sin que el usuario tenga que setear manualDuration a mano.
-    if result.status == "MISSING" then
+    local needsTriggerTiming = (result.status == "MISSING")
+        or (result.status == "ACTIVE" and (result.remaining == 0 or result.duration == 0))
+    if needsTriggerTiming then
         local effectiveDuration = (manualDuration and manualDuration > 0) and manualDuration
             or knownAuraDurations[spellID]
         if effectiveDuration and effectiveDuration > 0 then
@@ -1417,9 +1440,9 @@ function ns:GetAuraStatus(spellID, unit, filter, manualDuration)
                 local elapsed = GetTime() - since
                 if elapsed >= 0 and elapsed < effectiveDuration then
                     result.status = "ACTIVE"
-                    result.duration = effectiveDuration
-                    result.remaining = effectiveDuration - elapsed
-                    result.expirationTime = since + effectiveDuration
+                    if result.duration == 0 then result.duration = effectiveDuration end
+                    if result.remaining == 0 then result.remaining = effectiveDuration - elapsed end
+                    if result.expirationTime == 0 then result.expirationTime = since + effectiveDuration end
                 end
             end
         end

@@ -3,6 +3,16 @@ local _, ns = ...
 -- Traduções em português do Brasil (ptBR). As chaves são os textos em inglês
 -- usados em ns.L[...]. Chaves ausentes caem para o inglês via metatable em Locales.lua.
 ns.RegisterLocale("ptBR", {
+    -- ===== Diversos / Misc (ressurreição em combate + reencarnação) =====
+    ["Miscellaneous"] = "Diversos",
+    ["Combat Resurrections"] = "Ressurreições em combate",
+    ["Enable combat resurrection indicator"] = "Ativar indicador de ressurreições em combate",
+    ["Shows the group's shared battle-res charges (raid / Mythic+) — it does not depend on your class. With charges available: the number. Without: the icon dims and counts down to the next charge. Hidden in content with no shared pool."] = "Mostra as cargas de ressurreição em combate compartilhadas do grupo (raide / Mítica+) — não depende da sua classe. Com cargas disponíveis: o número. Sem: o ícone escurece e faz contagem regressiva até a próxima carga. Oculto em conteúdo sem reserva compartilhada.",
+    ["Text size (0=auto)"] = "Tamanho do texto (0=auto)",
+    ["Move icon"] = "Mover ícone",
+    ["Lock icon"] = "Travar ícone",
+    ["Right-click: open settings (out of combat)"] = "Clique direito: abrir configurações (fora de combate)",
+    ["Show Reincarnation (Shaman self-res)"] = "Mostrar Reencarnação (auto-ressurreição de Xamã)",
     -- ===== Mensagens de erro / feedback =====
     ["Spell not found: "] = "Magia não encontrada: ",
     [" already monitored."] = " já está sendo monitorada.",

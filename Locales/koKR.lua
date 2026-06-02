@@ -3,6 +3,16 @@ local _, ns = ...
 -- 한국어 번역 (koKR). 키는 ns.L[...]에서 사용되는 영어 UI 텍스트입니다.
 -- 누락된 키는 Locales.lua의 메타테이블을 통해 영어로 대체됩니다.
 ns.RegisterLocale("koKR", {
+    -- ===== 기타 / Misc (전투 부활 + 환생) =====
+    ["Miscellaneous"] = "기타",
+    ["Combat Resurrections"] = "전투 부활",
+    ["Enable combat resurrection indicator"] = "전투 부활 표시기 활성화",
+    ["Shows the group's shared battle-res charges (raid / Mythic+) — it does not depend on your class. With charges available: the number. Without: the icon dims and counts down to the next charge. Hidden in content with no shared pool."] = "공대의 공유 전투 부활 충전 수를 표시합니다 (공격대 / 쐐기돌) — 직업과 무관합니다. 충전이 있으면: 숫자. 없으면: 아이콘이 어두워지고 다음 충전까지 카운트다운합니다. 공유 자원이 없는 콘텐츠에서는 숨겨집니다.",
+    ["Text size (0=auto)"] = "글자 크기 (0=자동)",
+    ["Move icon"] = "아이콘 이동",
+    ["Lock icon"] = "아이콘 고정",
+    ["Right-click: open settings (out of combat)"] = "우클릭: 설정 열기 (전투 중 제외)",
+    ["Show Reincarnation (Shaman self-res)"] = "환생 표시 (주술사 자가 부활)",
     -- ===== 오류 / 피드백 메시지 =====
     ["Spell not found: "] = "주문을 찾을 수 없음: ",
     [" already monitored."] = " 이미 감시 중입니다.",

@@ -714,36 +714,100 @@ end
 local function MakeClassBuffCheckFn(class, spellID)
     return function()
         if not HasClassInGroup(class) then return nil end -- skip row
-        -- 1) Exact match contra spellID del cast (funciona para buffs donde
-        --    cast spellID == aura spellID, p.ej. Mark of the Wild 1126).
-        if C_UnitAuras and C_UnitAuras.GetPlayerAuraBySpellID then
-            local aura = C_UnitAuras.GetPlayerAuraBySpellID(spellID)
-            if aura then
-                return { ok = true, icon = aura.icon, expirationTime = aura.expirationTime, spellID = aura.spellId or spellID }
-            end
-        end
-        -- 2) Fallback por nombre: cuando el aura aplicado tiene spellID distinto
-        --    al cast (Blessing of the Bronze 364342 cast → aura spellID varia
-        --    por clase del target: 381732/381746/381748/381749/381750/381751/
-        --    381756). Tomamos el nombre del spell del cast via C_Spell.GetSpellInfo
-        --    (que devuelve el nombre LOCALIZADO al cliente — "Bendicion del
-        --    bronce" en esES) y matcheamos contra aura.name. i18n-safe porque
-        --    ambos extremos vienen del mismo API en el mismo idioma.
+
+        -- Nombre del buff localizado al idioma del cliente — usado como fallback
+        -- cuando aura.spellId != cast spellID (p.ej. Blessing of the Bronze
+        -- 364342 cast → aura spellID varia por clase del target). i18n-safe
+        -- porque tanto este nombre como aura.name vienen del mismo API.
         local buffName
         if C_Spell and C_Spell.GetSpellInfo then
             local info = C_Spell.GetSpellInfo(spellID)
             buffName = info and info.name
         end
-        if buffName and C_UnitAuras and C_UnitAuras.GetBuffDataByIndex then
-            local i = 1
-            while true do
-                local aura = C_UnitAuras.GetBuffDataByIndex("player", i)
-                if not aura then break end
-                if aura.name == buffName then
-                    return { ok = true, icon = aura.icon, expirationTime = aura.expirationTime, spellID = aura.spellId or spellID }
-                end
-                i = i + 1
+
+        -- UnitHasBuff: devuelve la aura match (spellID exacto o mismo nombre)
+        -- para `unit`. Funciona para "player" Y para "raidN" / "partyN".
+        local function UnitHasBuff(unit)
+            if not (C_UnitAuras and unit) then return nil end
+            -- Fast path para player: GetPlayerAuraBySpellID hace match exacto.
+            if unit == "player" and C_UnitAuras.GetPlayerAuraBySpellID then
+                local a = C_UnitAuras.GetPlayerAuraBySpellID(spellID)
+                if a then return a end
             end
+            -- Iteracion generica: match por spellID o por nombre localizado.
+            if C_UnitAuras.GetBuffDataByIndex then
+                local i = 1
+                while true do
+                    local a = C_UnitAuras.GetBuffDataByIndex(unit, i)
+                    if not a then break end
+                    if a.spellId == spellID then return a end
+                    if buffName and a.name == buffName then return a end
+                    i = i + 1
+                end
+            end
+            return nil
+        end
+
+        local _, myClass = UnitClass("player")
+        local iAmProvider = (myClass == class)
+        local playerAura = UnitHasBuff("player")
+
+        if iAmProvider then
+            -- Soy el proveedor del buff (p.ej. shaman para Skyfury). El OK
+            -- depende del GRUPO entero, no solo de mi: aunque yo tenga Skyfury
+            -- en mi, si algun raid member vivo y conectado no la tiene, la row
+            -- queda roja. Asi el provider sabe que tiene que recastear sin
+            -- tener que mirar manualmente las barras de cada uno.
+            local missing = 0
+            if not playerAura then missing = missing + 1 end
+
+            local n = (GetNumGroupMembers and GetNumGroupMembers()) or 0
+            if n > 0 then
+                local prefix = (IsInRaid and IsInRaid()) and "raid" or "party"
+                for i = 1, n do
+                    local unit = prefix .. i
+                    if UnitExists(unit) and not UnitIsUnit(unit, "player") then
+                        -- Solo cuentan los que pueden recibir el buff ahora:
+                        -- conectados y vivos. AFK/desconectado/muerto se
+                        -- excluyen para no pintar rojo permanente por miembros
+                        -- que el cast no va a poder buffar de todas formas.
+                        if UnitIsConnected(unit) and not UnitIsDeadOrGhost(unit) then
+                            if not UnitHasBuff(unit) then missing = missing + 1 end
+                        end
+                    end
+                end
+            end
+
+            if missing == 0 then
+                return {
+                    ok = true,
+                    icon = playerAura and playerAura.icon or nil,
+                    expirationTime = playerAura and playerAura.expirationTime or nil,
+                    spellID = (playerAura and playerAura.spellId) or spellID,
+                }
+            end
+            -- Faltantes en el grupo. Devolvemos icon/expiration del player
+            -- (si los tiene) para que el cell muestre el icono real del spell
+            -- desaturado en rojo en vez del X generico, y que se vea el timer
+            -- del buff del provider — info util para decidir cuando recastear.
+            return {
+                ok = false,
+                missing = missing,
+                icon = playerAura and playerAura.icon or nil,
+                expirationTime = playerAura and playerAura.expirationTime or nil,
+                spellID = (playerAura and playerAura.spellId) or spellID,
+            }
+        end
+
+        -- No soy proveedor: comportamiento original — me importa solo si yo
+        -- tengo el buff. El provider del grupo es responsable de mantenerlo.
+        if playerAura then
+            return {
+                ok = true,
+                icon = playerAura.icon,
+                expirationTime = playerAura.expirationTime,
+                spellID = playerAura.spellId or spellID,
+            }
         end
         return false
     end

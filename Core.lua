@@ -253,6 +253,22 @@ ns.PROFILE_DEFAULTS = {
     --   spellID, enabled, soundEnabled, soundName  (auras: + unit, filter)
     pulseSpells = {},
     pulseAuras = {},
+    -- Misc: features pequeñas que no ameritan menú propio. Viven bajo el sidebar
+    -- "Varios" (contenedor sin master toggle). Cada sub-feature tiene su enable.
+    misc = {
+        -- Combat Resurrection tracker: cargas de brez del GRUPO (raid/M+).
+        -- enabled=false → opt-in (feature nueva, no molesta a quien no la quiere).
+        combatRes = {
+            enabled = false,
+            iconSize = 44,
+            offsetX = 0,
+            offsetY = -150,
+            opacity = 1.0,
+            textSize = 0,            -- 0 = auto (proporcional al tamaño del icono)
+            showReincarnation = true,-- companion para Chamán (auto-res); ignorado si no es Chamán
+            placed = false,          -- false = nunca ubicado → primer enable abre modo mover
+        },
+    },
     -- MRT Timeline Reminders: lee VMRT.Note.Text1 y muestra iconos de hechizos
     -- cerca del cursor cuando se acerca el tiempo configurado en la nota.
     mrtTimeline = {
@@ -591,6 +607,7 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
         ns:InitVendorRestock()
         ns:InitRaidHealerComms()
         ns:InitSimulatedAuras()
+        ns:InitMiscFeatures()
         ns:InitConfig()
         ns:InitMinimapButton()
         ns:InitPublicAPI()

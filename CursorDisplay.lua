@@ -101,7 +101,7 @@ local function UpdateIconAppearance(iconFrame, data, entry)
     if data.maxCharges and data.maxCharges > 1 then
         -- Multi-charge spell:
         --   Center = recharge timer ONLY when 0 charges (with charges available, timer is noise).
-        --   Corner = charges count, only when > 1 (same style as aura stacks).
+        --   Corner = charges count, shown whenever >= 1 charge is available.
         -- Use ToPublic only — never fall back to raw value, which may be a SecureNumber
         -- that taints arithmetic (`> 0` throws "secret number value" and aborts the OnUpdate).
         local pubCharges = ns.ToPublic(data.charges)
@@ -115,7 +115,7 @@ local function UpdateIconAppearance(iconFrame, data, entry)
         if not hasCharges and data.cooldownRemaining and data.cooldownRemaining > 0 then
             iconFrame.text:SetText(ns.FormatDuration(data.cooldownRemaining))
         end
-        if type(pubCharges) == "number" and pubCharges > 1 then
+        if type(pubCharges) == "number" and pubCharges >= 1 then
             iconFrame.chargeText:SetText(pubCharges); iconFrame.chargeText:Show()
         end
     else
@@ -124,13 +124,10 @@ local function UpdateIconAppearance(iconFrame, data, entry)
         elseif data.remaining and data.remaining > 0 then
             iconFrame.text:SetText(ns.FormatDuration(data.remaining))
         end
-        -- Threshold de visibilidad del contador: en auras reales solo mostramos
-        -- si stacks > 1 (un buff binario con applications=1 no necesita "1"
-        -- pintado). En auras simuladas bajamos a >= 1: el user explicitamente
-        -- configuro el spell para tracker cargas, asi que querer ver "1" al
-        -- final del consumo es esperable.
-        local stackMin = data.isSimulated and 1 or 2
-        if data.stacks and data.stacks >= stackMin then
+        -- Mostramos el contador siempre que el aura reporte stacks >= 1. Los buffs
+        -- binarios reportan applications=0 (no entran aqui), asi que esto solo pinta
+        -- numero cuando hay acumulaciones reales que trackear.
+        if data.stacks and data.stacks >= 1 then
             iconFrame.chargeText:SetText(data.stacks); iconFrame.chargeText:Show()
         end
     end

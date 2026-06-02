@@ -3,6 +3,16 @@ local _, ns = ...
 -- Deutsche Übersetzungen (deDE). Schlüssel sind die englischen UI-Texte aus ns.L[...].
 -- Fehlende Schlüssel fallen über die Metatable in Locales.lua auf Englisch zurück.
 ns.RegisterLocale("deDE", {
+    -- ===== Verschiedenes / Misc (Kampfwiederbelebung + Reinkarnation) =====
+    ["Miscellaneous"] = "Verschiedenes",
+    ["Combat Resurrections"] = "Kampfwiederbelebungen",
+    ["Enable combat resurrection indicator"] = "Anzeige für Kampfwiederbelebungen aktivieren",
+    ["Shows the group's shared battle-res charges (raid / Mythic+) — it does not depend on your class. With charges available: the number. Without: the icon dims and counts down to the next charge. Hidden in content with no shared pool."] = "Zeigt die geteilten Kampfwiederbelebungs-Ladungen der Gruppe (Schlachtzug / Mythisch+) – unabhängig von deiner Klasse. Mit verfügbaren Ladungen: die Zahl. Ohne: das Symbol wird abgedunkelt und zählt bis zur nächsten Ladung herunter. In Inhalten ohne geteilten Vorrat ausgeblendet.",
+    ["Text size (0=auto)"] = "Textgröße (0=automatisch)",
+    ["Move icon"] = "Symbol verschieben",
+    ["Lock icon"] = "Symbol fixieren",
+    ["Right-click: open settings (out of combat)"] = "Rechtsklick: Einstellungen öffnen (außerhalb des Kampfes)",
+    ["Show Reincarnation (Shaman self-res)"] = "Reinkarnation anzeigen (Schamanen-Selbstwiederbelebung)",
     -- ===== Fehler- / Feedback-Meldungen =====
     ["Spell not found: "] = "Zauber nicht gefunden: ",
     [" already monitored."] = " wird bereits überwacht.",

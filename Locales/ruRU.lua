@@ -3,6 +3,16 @@ local _, ns = ...
 -- Русский перевод (ruRU). Ключами служат английские UI-строки из ns.L[...].
 -- Если ключ отсутствует, metatable из Locales.lua вернёт английский текст.
 ns.RegisterLocale("ruRU", {
+    -- ===== Разное / Misc (боевое воскрешение + перевоплощение) =====
+    ["Miscellaneous"] = "Разное",
+    ["Combat Resurrections"] = "Боевые воскрешения",
+    ["Enable combat resurrection indicator"] = "Включить индикатор боевых воскрешений",
+    ["Shows the group's shared battle-res charges (raid / Mythic+) — it does not depend on your class. With charges available: the number. Without: the icon dims and counts down to the next charge. Hidden in content with no shared pool."] = "Показывает общий запас боевых воскрешений группы (рейд / Мифик+) — не зависит от вашего класса. При наличии зарядов: число. Без них: значок тускнеет и отсчитывает время до следующего заряда. Скрыто в контенте без общего запаса.",
+    ["Text size (0=auto)"] = "Размер текста (0=авто)",
+    ["Move icon"] = "Переместить значок",
+    ["Lock icon"] = "Закрепить значок",
+    ["Right-click: open settings (out of combat)"] = "Правый клик: открыть настройки (вне боя)",
+    ["Show Reincarnation (Shaman self-res)"] = "Показать Перевоплощение (самовоскрешение шамана)",
     -- ===== Сообщения об ошибках / уведомления =====
     ["Spell not found: "] = "Заклинание не найдено: ",
     [" already monitored."] = " уже отслеживается.",

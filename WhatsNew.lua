@@ -21,6 +21,19 @@ local addonName, ns = ...
 local function GetReleaseNotes()
     return {
         {
+            version = "1.10.0",
+            date = "2026-06-01",
+            items = {
+                ns.L["Miscellaneous: new sidebar section for small features. First one is a Combat Resurrection tracker that shows the group's shared battle-res charges in raids and Mythic+ — it works on any class (it does not depend on you having a brez). When charges are available it shows the count; when empty the icon dims and counts down to the next charge. Shamans also get a companion Reincarnation indicator (bright when ready, or a countdown to the next self-res)."],
+                ns.L["Miscellaneous: the combat-res icons are always visible in raid and Mythic+ (in or out of combat). Drag them anywhere with the 'Move icon' button (it auto-unlocks the first time you enable the feature), tune icon/text size, and right-click an icon out of combat to open its settings."],
+                ns.L["Raid Spells (A): the panel now only shows spells with a base cooldown over 30 seconds, so short-cooldown casts no longer clutter the healer cooldown list."],
+                ns.L["Ready Check Panel: class-buff rows are now group-aware for the provider. If you are the one who casts a raid buff (e.g. Skyfury), the row stays red until every connected, alive group member actually has it — so you know to recast without checking each unit frame."],
+                ns.L["Cursor: stack and charge counts now display from 1 (previously only at 2 or more), so you can always see how many stacks or charges are available."],
+                ns.L["Fix: the character ring no longer resets and loops back to the start when you enter combat for buffs whose duration the game hides in combat (e.g. Astral Shift)."],
+                ns.L["Fix: buying at the auction house no longer throws an 'invalid option in format' error when the confirmation popup includes a price-change indicator."],
+            },
+        },
+        {
             version = "1.9.0",
             date = "2026-05-26",
             items = {

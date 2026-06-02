@@ -345,6 +345,22 @@ SendHello = function()
     _lastHelloSent = GetTime()
 end
 
+-- Umbral de cooldown: solo se muestran/transmiten hechizos con CD base > 30s.
+-- GetSpellBaseCooldown devuelve el CD base en ms (sin reducciones de talento), lo
+-- que da un criterio consistente entre jugadores. Fail-open: si no se puede
+-- determinar el CD, dejamos pasar el hechizo para no romper el tracking.
+local CAST_MIN_COOLDOWN_MS = 30000
+local function MeetsCooldownThreshold(spellID)
+    if not spellID then return false end
+    local baseMS
+    if type(GetSpellBaseCooldown) == "function" then
+        local ok, ms = pcall(GetSpellBaseCooldown, spellID)
+        if ok and type(ms) == "number" then baseMS = ms end
+    end
+    if baseMS == nil then return true end -- CD desconocido → fail-open (mostrar)
+    return baseMS > CAST_MIN_COOLDOWN_MS
+end
+
 local function Broadcast(spellID)
     if not _isHealerSpec then return end
     local s = ns.db and ns.db.raidHealerComms
@@ -352,6 +368,8 @@ local function Broadcast(spellID)
     local channel = ResolveChannel()
     if not channel then return end
     if not GetTrackedSpells()[spellID] then return end
+    -- Solo cooldowns "grandes": ignoramos hechizos con CD base <= 30s.
+    if not MeetsCooldownThreshold(spellID) then return end
     if C_ChatInfo and C_ChatInfo.SendAddonMessage then
         pcall(C_ChatInfo.SendAddonMessage, PREFIX, EncodeCast(spellID), channel)
     end
@@ -367,6 +385,9 @@ end
 -- Definicion (forward-declared como local arriba).
 RecordCast = function(senderFull, spellID)
     if not senderFull or not spellID then return end
+    -- Filtro de visibilidad: solo registramos hechizos con CD base > 30s. Cubre
+    -- casts recibidos de otros clientes (incluso versiones viejas sin el filtro).
+    if not MeetsCooldownThreshold(spellID) then return end
     local name = StripRealm(senderFull)
     local list = _recentCasts[name]
     if not list then list = {}; _recentCasts[name] = list end
@@ -750,4 +771,37 @@ function ns:HideRaidHealerCommsTest()
     _recentCasts = {}
     _addonHealers = {}
     if panel then panel:Hide() end
+end
+
+-- ============================================================
+-- Debug helpers (consumidos por /hht healers en Config.lua)
+-- ============================================================
+
+-- Snapshot de _addonHealers con conteo de casts recientes inlineado. Devuelto
+-- como tabla nueva para que el caller no pueda mutar el state interno.
+ns._RaidHealerCommsDumpHealers = function()
+    local out = {}
+    for name, info in pairs(_addonHealers) do
+        out[name] = {
+            class = info.class,
+            lastPing = info.lastPing,
+            casts = _recentCasts[name] and #_recentCasts[name] or 0,
+        }
+    end
+    return out
+end
+
+-- Force-send hello bypassing el rate-limit del heartbeat. Devuelve (ok, reason).
+-- Util para troubleshooting: si el receiver no nos detecta, mandamos hello "ya"
+-- y vemos si aparece en su /hht healers.
+ns._RaidHealerCommsForceHello = function()
+    if not _isHealerSpec then return false, "not healer spec" end
+    local s = ns.db and ns.db.raidHealerComms
+    if not s or s.enabled == false then return false, "disabled in config" end
+    local channel = ResolveChannel()
+    if not channel then return false, "not in group/instance" end
+    if not (C_ChatInfo and C_ChatInfo.SendAddonMessage) then return false, "C_ChatInfo unavailable" end
+    local ok = pcall(C_ChatInfo.SendAddonMessage, PREFIX, EncodeHello(), channel)
+    _lastHelloSent = GetTime()
+    return ok and true or false, ok and channel or "SendAddonMessage failed"
 end

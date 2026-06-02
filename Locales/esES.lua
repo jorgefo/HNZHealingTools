@@ -424,6 +424,17 @@ ns.RegisterLocale("esES", {
     ["Macros"] = "Macros",
     ["Trigger key:"] = "Clave trigger:",
     ["Show preview"] = "Ver preview",
+    ["Hide preview"] = "Ocultar preview",
+    ["Miscellaneous"] = "Varios",
+    ["Combat Resurrections"] = "Resurrecciones de combate",
+    ["Enable combat resurrection indicator"] = "Activar indicador de resurrecciones de combate",
+    ["Text size (0=auto)"] = "Tamaño de texto (0=auto)",
+    ["Move icon"] = "Mover icono",
+    ["Lock icon"] = "Fijar icono",
+    ["Right-click: open settings (out of combat)"] = "Click derecho: abrir configuración (fuera de combate)",
+    ["Show Reincarnation (Shaman self-res)"] = "Mostrar Reencarnación (auto-res de Chamán)",
+    ["Shows the group's shared battle-res charges (raid / Mythic+) — it does not depend on your class. With charges available: the number. Without: the icon dims and counts down to the next charge. Hidden in content with no shared pool."] =
+        "Muestra las cargas de resurrección de combate compartidas del grupo (raid / Mítica+) — no depende de tu clase. Con cargas disponibles: el número. Sin cargas: el icono se apaga y muestra la cuenta regresiva hasta la próxima carga. Oculto en contenido sin pool compartido.",
     ["Optional. Fire this aura from a macro: /hht trigger <key>. Requires Duration > 0. Case-insensitive."] =
         "Opcional. Disparar esta aura desde una macro: /hht trigger <key>. Requiere Duration > 0. Insensible a mayúsculas.",
     ["Optional. Fire this pulse from a macro: /hht trigger <key>. Case-insensitive."] =

@@ -3,6 +3,16 @@ local _, ns = ...
 -- Traductions françaises (frFR). Les clés sont les textes anglais utilisés dans ns.L[...].
 -- Les clés manquantes retombent sur l'anglais via la metatable de Locales.lua.
 ns.RegisterLocale("frFR", {
+    -- ===== Divers / Misc (résurrection en combat + réincarnation) =====
+    ["Miscellaneous"] = "Divers",
+    ["Combat Resurrections"] = "Résurrections en combat",
+    ["Enable combat resurrection indicator"] = "Activer l'indicateur de résurrections en combat",
+    ["Shows the group's shared battle-res charges (raid / Mythic+) — it does not depend on your class. With charges available: the number. Without: the icon dims and counts down to the next charge. Hidden in content with no shared pool."] = "Affiche les charges de résurrection en combat partagées du groupe (raid / Mythique+) — indépendant de votre classe. Avec des charges disponibles : le nombre. Sans : l'icône s'assombrit et décompte jusqu'à la prochaine charge. Masqué dans le contenu sans réserve partagée.",
+    ["Text size (0=auto)"] = "Taille du texte (0=auto)",
+    ["Move icon"] = "Déplacer l'icône",
+    ["Lock icon"] = "Verrouiller l'icône",
+    ["Right-click: open settings (out of combat)"] = "Clic droit : ouvrir les paramètres (hors combat)",
+    ["Show Reincarnation (Shaman self-res)"] = "Afficher Réincarnation (auto-résurrection du chaman)",
     -- ===== Messages d'erreur / retour =====
     ["Spell not found: "] = "Sort introuvable : ",
     [" already monitored."] = " est déjà surveillé.",

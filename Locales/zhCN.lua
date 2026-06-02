@@ -3,6 +3,16 @@ local _, ns = ...
 -- 简体中文翻译 (zhCN)。键为 ns.L[...] 中使用的英文 UI 文本。
 -- 缺失的键会通过 Locales.lua 中的 metatable 回退到英文。
 ns.RegisterLocale("zhCN", {
+    -- ===== 杂项 / Misc (战斗复活 + 轮回) =====
+    ["Miscellaneous"] = "杂项",
+    ["Combat Resurrections"] = "战斗复活",
+    ["Enable combat resurrection indicator"] = "启用战斗复活指示器",
+    ["Shows the group's shared battle-res charges (raid / Mythic+) — it does not depend on your class. With charges available: the number. Without: the icon dims and counts down to the next charge. Hidden in content with no shared pool."] = "显示团队共享的战斗复活充能数（团队副本 / 大秘境）——与你的职业无关。有充能时：显示数字。没有时：图标变暗并倒计时至下一次充能。在没有共享池的内容中隐藏。",
+    ["Text size (0=auto)"] = "文字大小（0=自动）",
+    ["Move icon"] = "移动图标",
+    ["Lock icon"] = "锁定图标",
+    ["Right-click: open settings (out of combat)"] = "右键：打开设置（脱离战斗时）",
+    ["Show Reincarnation (Shaman self-res)"] = "显示轮回（萨满自我复活）",
     -- ===== 错误 / 反馈消息 =====
     ["Spell not found: "] = "未找到法术：",
     [" already monitored."] = " 已被监控。",

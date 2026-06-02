@@ -94,6 +94,48 @@ function ns:InitConfig()
             else
                 print("  |cffcccccc(Open the auction house and re-run /hht ah to inspect prices.)|r")
             end
+        elseif cmd == "healers" or cmd == "comms" then
+            -- Dump diagnostico del modulo RaidHealerComms. Util cuando un healer
+            -- que tiene el addon no aparece en el panel del otro: confirma local
+            -- state (spec healer? enabled? channel resuelto?) + lista de healers
+            -- descubiertos via hello/cast. Subcomandos:
+            --   /hht healers hello   -> fuerza un broadcast hello (handshake manual)
+            --   /hht healers state   -> alias del default (solo dump)
+            local sub = rest and rest:match("^(%S+)") or nil
+            sub = sub and sub:lower() or nil
+            print("|cff00ccffHNZ|r Raid Healer Comms diagnostic:")
+            local s = ns.db and ns.db.raidHealerComms
+            if not s then print("  raidHealerComms config: |cffff5555NIL|r"); return end
+            local spec = GetSpecialization and GetSpecialization()
+            local specID = spec and GetSpecializationInfo and GetSpecializationInfo(spec) or 0
+            local inInstance, instType = IsInInstance()
+            print(string.format("  enabled=%s  showOnlyForHealers=%s  showOnlyInRaid=%s  hideWhenEmpty=%s",
+                tostring(s.enabled), tostring(s.showOnlyForHealers),
+                tostring(s.showOnlyInRaid), tostring(s.hideWhenEmpty)))
+            print(string.format("  specID=%d  inInstance=%s  type=%s  inRaid=%s  inGroup=%s",
+                specID, tostring(inInstance), tostring(instType),
+                tostring(IsInRaid()), tostring(IsInGroup())))
+            local healers, count = ns._RaidHealerCommsDumpHealers and ns._RaidHealerCommsDumpHealers() or nil, 0
+            if healers then
+                local now = GetTime()
+                print("  discovered healers (via hello/cast):")
+                for name, info in pairs(healers) do
+                    count = count + 1
+                    print(string.format("    %s  class=%s  lastPing=%.1fs ago  recentCasts=%d",
+                        name, tostring(info.class),
+                        now - (info.lastPing or 0),
+                        info.casts or 0))
+                end
+                if count == 0 then print("    |cffffcc44(none)|r — no addon healers detected yet") end
+            end
+            if sub == "hello" then
+                if ns._RaidHealerCommsForceHello then
+                    local ok, why = ns._RaidHealerCommsForceHello()
+                    print("  manual hello: " .. (ok and "|cff66ff66sent|r" or ("|cffff5555skipped|r ("..tostring(why)..")")))
+                end
+            else
+                print("  |cffcccccc(use '/hht healers hello' to force-send a hello broadcast)|r")
+            end
         elseif cmd == "trigger" then
             local key = rest and rest:match("^%s*(%S+)") or nil
             if not key or key == "" then
@@ -3696,6 +3738,68 @@ local function BuildCooldownPulsePage(p)
 
 end
 
+-- Page "Varios": cajón de features pequeñas que no ameritan su propio menú. Cada
+-- sub-feature trae su propio enable (la sección no tiene master toggle en el
+-- sidebar). Hoy: indicador de resurrecciones de combate del grupo.
+local function BuildMiscPage(p)
+    local C1,C2=20,340; local y=-8
+    local hd=H(p,ns.L["Miscellaneous"]); hd:SetPoint("TOPLEFT",8,y)
+
+    -- Modo mover: desbloquea el arrastre libre del icono (muestra dummy + hint y
+    -- funciona aunque la feature esté deshabilitada, para ubicarlo antes de activar).
+    local mvBtn=Btn(p, ns.L["Move icon"], 130, 22); mvBtn:SetPoint("TOPRIGHT", -16, -8)
+    local function RefreshMv() mvBtn:SetText(ns:IsMiscCombatResMoveShown() and ns.L["Lock icon"] or ns.L["Move icon"]) end
+    mvBtn:SetScript("OnClick", function() ns:ToggleMiscCombatResMove(); RefreshMv() end)
+    RefreshMv()
+    y=y-28
+
+    local sh=SubH(p,ns.L["Combat Resurrections"]); sh:SetPoint("TOPLEFT",C1,y); y=y-18
+    local desc=p:CreateFontString(nil,"OVERLAY","GameFontDisableSmall")
+    desc:SetPoint("TOPLEFT",C1,y); desc:SetWidth(500); desc:SetJustifyH("LEFT")
+    desc:SetText(ns.L["Shows the group's shared battle-res charges (raid / Mythic+) — it does not depend on your class. With charges available: the number. Without: the icon dims and counts down to the next charge. Hidden in content with no shared pool."])
+    y=y-34
+
+    local enCk=CreateCheckbox(p,ns.L["Enable combat resurrection indicator"],
+        function() return ns.db.misc.combatRes.enabled end,
+        function(v)
+            ns.db.misc.combatRes.enabled=v
+            ns:RefreshMiscCombatRes()
+            -- Primer enable y nunca ubicado → abrir modo mover para que lo posicione.
+            if v and not ns.db.misc.combatRes.placed then
+                ns.db.misc.combatRes.placed=true
+                ns:SetMiscCombatResMove(true); RefreshMv()
+            end
+        end)
+    enCk:SetPoint("TOPLEFT",C1,y); table.insert(allCheckboxes,enCk)
+    y=y-34
+
+    -- Companion de Reencarnación: el toggle se muestra solo a quien CONOZCA el
+    -- hechizo de auto-res (hoy = Chamán). El flag igual persiste en el perfil
+    -- (compartible entre personajes), por eso no lo limpiamos para otras clases.
+    if IsPlayerSpell and IsPlayerSpell(20608) then
+        local rcCk=CreateCheckbox(p,ns.L["Show Reincarnation (Shaman self-res)"],
+            function() return ns.db.misc.combatRes.showReincarnation ~= false end,
+            function(v) ns.db.misc.combatRes.showReincarnation=v; ns:RefreshMiscCombatRes() end)
+        rcCk:SetPoint("TOPLEFT",C1,y); table.insert(allCheckboxes,rcCk)
+        y=y-34
+    end
+
+    local szH=SubH(p,ns.L["Size & Appearance"]); szH:SetPoint("TOPLEFT",C1,y); local c1y=y-20
+    local defs1={
+        {ns.L["Icon Size"],24,128,2,function() return ns.db.misc.combatRes.iconSize end,function(v) ns.db.misc.combatRes.iconSize=v; ns:RefreshMiscCombatRes() end},
+        {ns.L["Text size (0=auto)"],0,40,1,function() return ns.db.misc.combatRes.textSize or 0 end,function(v) ns.db.misc.combatRes.textSize=v; ns:RefreshMiscCombatRes() end},
+        {ns.L["Opacity"],0.1,1.0,0.05,function() return ns.db.misc.combatRes.opacity end,function(v) ns.db.misc.combatRes.opacity=v; ns:RefreshMiscCombatRes() end},
+    }
+    for _,d in ipairs(defs1) do local s=CreateSlider(p,d[1],d[2],d[3],d[4],d[5],d[6]); s:SetPoint("TOPLEFT",C1,c1y); table.insert(allSliders,s); c1y=c1y-48 end
+
+    local poH=SubH(p,ns.L["Position"]); poH:SetPoint("TOPLEFT",C2,y); local c2y=y-20
+    local defs2={
+        {ns.L["Offset X"],-600,600,5,function() return ns.db.misc.combatRes.offsetX end,function(v) ns.db.misc.combatRes.offsetX=v; ns:RefreshMiscCombatRes() end},
+        {ns.L["Offset Y"],-500,500,5,function() return ns.db.misc.combatRes.offsetY end,function(v) ns.db.misc.combatRes.offsetY=v; ns:RefreshMiscCombatRes() end},
+    }
+    for _,d in ipairs(defs2) do local s=CreateSlider(p,d[1],d[2],d[3],d[4],d[5],d[6]); s:SetPoint("TOPLEFT",C2,c2y); table.insert(allSliders,s); c2y=c2y-48 end
+end
+
 -- Page 7: Cursor Ring (anillo decorativo siguiendo al raton)
 -- Catalogo de texturas vive en CursorRing.lua (ns.CURSOR_RING_TEXTURES) para
 -- mantener junto el dato de calibracion por textura. Aqui solo lo consumimos.
@@ -4689,6 +4793,197 @@ local function BuildRaidHealerCommsPage(p)
     hideBtn:SetPoint("RIGHT", testBtn, "LEFT", -4, 0)
     hideBtn:SetScript("OnClick", function()
         if ns.HideRaidHealerCommsTest then ns:HideRaidHealerCommsTest() end
+    end)
+
+    -- Debug popup: equivalente UI a `/hht healers`. Click toggle, refresca live
+    -- mientras esta visible. Sirve para diagnosticar por que un healer remoto
+    -- no aparece (mostrar inmediatamente quien fue detectado, channel resuelto,
+    -- spec local, etc.) y para forzar un hello sin tener que tipear comandos.
+    local debugBtn = Btn(p, ns.L["Debug"] or "Debug", 70, 22)
+    debugBtn:SetPoint("RIGHT", hideBtn, "LEFT", -4, 0)
+
+    -- Parentado a UIParent (no a `p`) y posicionado al costado derecho del
+    -- config principal para que no se solape ni siga al config cuando el usuario
+    -- lo arrastra. Drag propio desde la barra de titulo.
+    local dbg = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
+    dbg:SetSize(420, 280)
+    dbg:SetFrameStrata("FULLSCREEN_DIALOG")
+    dbg:SetMovable(true)
+    dbg:SetClampedToScreen(true)
+    dbg:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8x8",
+        edgeFile = "Interface\\Buttons\\WHITE8x8",
+        edgeSize = 1,
+    })
+    dbg:SetBackdropColor(0.05, 0.05, 0.08, 0.95)
+    dbg:SetBackdropBorderColor(0.30, 0.30, 0.40, 1)
+    dbg:EnableMouse(true)
+    dbg:Hide()
+
+    -- Title bar dedicada para drag — el resto del frame no captura el drag para
+    -- que clicks sobre el texto/botones no inicien movimiento.
+    local dbgTitleBar = CreateFrame("Frame", nil, dbg)
+    dbgTitleBar:SetPoint("TOPLEFT", 0, 0)
+    dbgTitleBar:SetPoint("TOPRIGHT", -26, 0)
+    dbgTitleBar:SetHeight(22)
+    dbgTitleBar:EnableMouse(true)
+    dbgTitleBar:RegisterForDrag("LeftButton")
+    dbgTitleBar:SetScript("OnDragStart", function() dbg:StartMoving() end)
+    dbgTitleBar:SetScript("OnDragStop", function() dbg:StopMovingOrSizing() end)
+
+    local dbgTitle = dbgTitleBar:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    dbgTitle:SetPoint("LEFT", 8, 0)
+    dbgTitle:SetText(ns.L["Healer Comms Debug"] or "Healer Comms Debug")
+    dbgTitle:SetTextColor(0.85, 0.85, 1.0)
+
+    local dbgClose = Btn(dbg, "X", 22, 22)
+    dbgClose:SetPoint("TOPRIGHT", -4, -4)
+    dbgClose:SetScript("OnClick", function() dbg:Hide() end)
+
+    -- Anclamos la posicion inicial al costado derecho del config principal en
+    -- la primera apertura. Una vez que el usuario lo arrastra, StartMoving
+    -- limpia los anchors y la posicion queda donde el la dejo.
+    local dbgPositioned = false
+    local function PositionDebugInitial()
+        if dbgPositioned then return end
+        dbgPositioned = true
+        dbg:ClearAllPoints()
+        local main = _G.HNZHealingToolsConfigWindow
+        if main and main:IsShown() then
+            dbg:SetPoint("TOPLEFT", main, "TOPRIGHT", 8, 0)
+        else
+            dbg:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+        end
+    end
+
+    local dbgState = dbg:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    dbgState:SetPoint("TOPLEFT", 10, -28)
+    dbgState:SetPoint("TOPRIGHT", -10, -28)
+    dbgState:SetJustifyH("LEFT"); dbgState:SetJustifyV("TOP")
+    dbgState:SetHeight(60); dbgState:SetWordWrap(true)
+
+    local dbgListHdr = dbg:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    dbgListHdr:SetPoint("TOPLEFT", 10, -94)
+    dbgListHdr:SetText(ns.L["Discovered healers"] or "Discovered healers")
+    dbgListHdr:SetTextColor(0.7, 0.85, 1.0)
+
+    local dbgList = dbg:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    dbgList:SetPoint("TOPLEFT", 10, -112)
+    dbgList:SetPoint("BOTTOMRIGHT", -10, 38)
+    dbgList:SetJustifyH("LEFT"); dbgList:SetJustifyV("TOP")
+    dbgList:SetWordWrap(true)
+
+    local helloBtn = Btn(dbg, ns.L["Force Hello"] or "Force Hello", 110, 22)
+    helloBtn:SetPoint("BOTTOMLEFT", 10, 8)
+    local helloResult = dbg:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    helloResult:SetPoint("LEFT", helloBtn, "RIGHT", 8, 0)
+
+    local printBtn = Btn(dbg, ns.L["Print to chat"] or "Print to chat", 110, 22)
+    printBtn:SetPoint("BOTTOMRIGHT", -10, 8)
+
+    local function FormatHealerSpec(specID)
+        local HEALER_SPECS = { [65]="HPal", [105]="RDru", [256]="DPri", [257]="HPri",
+            [264]="RSham", [270]="MW", [1468]="Pres" }
+        return HEALER_SPECS[specID]
+    end
+
+    local function RefreshDebug()
+        local s = ns.db and ns.db.raidHealerComms
+        if not s then dbgState:SetText("|cffff5555raidHealerComms config: NIL|r"); return end
+        local spec = GetSpecialization and GetSpecialization()
+        local specID = spec and GetSpecializationInfo and GetSpecializationInfo(spec) or 0
+        local healerLabel = FormatHealerSpec(specID)
+        local inInstance, instType = IsInInstance()
+        local isHealer = healerLabel ~= nil
+
+        local lines = {
+            string.format("|cff%s%s|r  |cffaaaaaaspec %d (%s)|r",
+                isHealer and "66ff66" or "ff8855",
+                isHealer and ((ns.L and ns.L["Healer spec"]) or "Healer spec")
+                    or ((ns.L and ns.L["Not a healer spec"]) or "Not a healer spec"),
+                specID, healerLabel or "non-healer"),
+            string.format("enabled=%s  showOnlyForHealers=%s  showOnlyInRaid=%s",
+                tostring(s.enabled), tostring(s.showOnlyForHealers), tostring(s.showOnlyInRaid)),
+            string.format("inInstance=%s  type=%s  inRaid=%s  inGroup=%s",
+                tostring(inInstance), tostring(instType),
+                tostring(IsInRaid()), tostring(IsInGroup())),
+        }
+        dbgState:SetText(table.concat(lines, "\n"))
+
+        local healers = ns._RaidHealerCommsDumpHealers and ns._RaidHealerCommsDumpHealers() or {}
+        local names = {}
+        for n in pairs(healers) do table.insert(names, n) end
+        table.sort(names)
+        if #names == 0 then
+            dbgList:SetText("|cffff8855" .. ((ns.L and ns.L["(none) — no addon healers detected"]) or "(none) — no addon healers detected") .. "|r")
+        else
+            local now = GetTime()
+            local out = {}
+            for _, name in ipairs(names) do
+                local info = healers[name]
+                local age = now - (info.lastPing or 0)
+                local stale = age > 90
+                table.insert(out, string.format("|cff%s%s|r  |cffaaaaaa%s  %.0fs ago  %d casts|r",
+                    stale and "ff8855" or "66ff66",
+                    name, tostring(info.class or "?"), age, info.casts or 0))
+            end
+            dbgList:SetText(table.concat(out, "\n"))
+        end
+    end
+
+    helloBtn:SetScript("OnClick", function()
+        if not ns._RaidHealerCommsForceHello then return end
+        local ok, why = ns._RaidHealerCommsForceHello()
+        if ok then
+            helloResult:SetText("|cff66ff66" .. ((ns.L and ns.L["sent on"]) or "sent on") .. " " .. tostring(why) .. "|r")
+        else
+            helloResult:SetText("|cffff5555" .. ((ns.L and ns.L["skipped"]) or "skipped") .. ": " .. tostring(why) .. "|r")
+        end
+        RefreshDebug()
+    end)
+
+    printBtn:SetScript("OnClick", function()
+        -- Reusa el dump del slash command. Llamarlo directo no es trivial
+        -- (es un closure en SlashCmdList), asi que imprimimos el equivalente
+        -- inline. Mantenelo en sync con el caso "healers" del SlashCmdList.
+        print("|cff00ccffHNZ|r " .. ((ns.L and ns.L["Raid Healer Comms diagnostic:"]) or "Raid Healer Comms diagnostic:"))
+        local s = ns.db and ns.db.raidHealerComms
+        if not s then return end
+        local spec = GetSpecialization and GetSpecialization()
+        local specID = spec and GetSpecializationInfo and GetSpecializationInfo(spec) or 0
+        local inInstance, instType = IsInInstance()
+        print(string.format("  enabled=%s  showOnlyForHealers=%s  showOnlyInRaid=%s",
+            tostring(s.enabled), tostring(s.showOnlyForHealers), tostring(s.showOnlyInRaid)))
+        print(string.format("  specID=%d  inInstance=%s  type=%s  inRaid=%s  inGroup=%s",
+            specID, tostring(inInstance), tostring(instType),
+            tostring(IsInRaid()), tostring(IsInGroup())))
+        local healers = ns._RaidHealerCommsDumpHealers and ns._RaidHealerCommsDumpHealers() or {}
+        local now, n = GetTime(), 0
+        for name, info in pairs(healers) do
+            n = n + 1
+            print(string.format("  %s  class=%s  lastPing=%.1fs ago  recentCasts=%d",
+                name, tostring(info.class), now - (info.lastPing or 0), info.casts or 0))
+        end
+        if n == 0 then print("  |cffffcc44(none)|r — no addon healers detected yet") end
+    end)
+
+    -- Live refresh mientras el popup esta abierto. 0.5s es suficiente: las
+    -- entradas se updatean cada CHAT_MSG_ADDON + pruneTicker.
+    local accum = 0
+    dbg:SetScript("OnUpdate", function(_, elapsed)
+        accum = accum + elapsed
+        if accum >= 0.5 then accum = 0; RefreshDebug() end
+    end)
+    dbg:SetScript("OnShow", function() helloResult:SetText(""); RefreshDebug() end)
+
+    debugBtn:SetScript("OnClick", function()
+        if dbg:IsShown() then
+            dbg:Hide()
+        else
+            PositionDebugInitial()
+            dbg:Show()
+            dbg:Raise()
+        end
     end)
 
     y = y - 36
@@ -6229,6 +6524,7 @@ function ns:CreateConfigWindow()
         {name=ns.L["Auction House"] or "Auction House", enabledKey="vendorRestock", builder=BuildVendorRestockPage},
         {name=ns.L["Raid Spells"] or "Raid Spells (A)",   enabledKey="raidHealerComms", builder=BuildRaidHealerCommsPage},
         {name=ns.L["Simulated Auras"] or "Simulated Auras (A)", enabledKey="simulatedAuras",  builder=BuildSimulatedAurasPage},
+        {name=ns.L["Miscellaneous"], builder=BuildMiscPage},
         {name=ns.L["Macros"],        builder=BuildMacrosPage},
         {name=ns.L["Profiles"],      builder=BuildProfilesPage},
     }
@@ -6452,6 +6748,19 @@ function ns:CreateConfigWindow()
     end)
     menuButtons[1]._active=true
     ShowPage(1)
+
+    -- Abre la ventana directamente en una página del sidebar (por nombre localizado).
+    -- El OnShow fuerza page 1, así que seleccionamos DESPUÉS de Show para overridearlo.
+    function ns:OpenConfigToPage(name)
+        if not mainWindow:IsShown() then mainWindow:Show() end
+        for i,def in ipairs(pageDefs) do
+            if def.name == name then
+                for j,b in ipairs(menuButtons) do b._active=(j==i) end
+                ShowPage(i)
+                return
+            end
+        end
+    end
 end
 
 function ns:ToggleConfigWindow() if mainWindow:IsShown() then mainWindow:Hide() else mainWindow:Show() end end

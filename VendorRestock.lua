@@ -299,7 +299,15 @@ local function BuildBuyConfirmText(itemID, unitPrice, totalPrice, quantity)
         table.insert(lines, "|cff888888" .. ((ns.L and ns.L["No previous purchase recorded."]) or "No previous purchase recorded.") .. "|r")
     end
 
-    return table.concat(lines, "\n")
+    local text = table.concat(lines, "\n")
+    -- StaticPopup pasa el .text por string.format(text, arg1, arg2) (el GameDialog
+    -- de Midnight lo hace SIEMPRE, incluso con args nil). Cualquier '%' literal en
+    -- el texto — p.ej. el indicador "+15%" de variacion de precio, o un nombre de
+    -- item con '%' — se interpreta como especificador de formato y dispara
+    -- "invalid option in 'format'". Escapamos '%' -> '%%' para que format lo
+    -- renderice como un '%' literal. (En gsub el patron %% matchea un '%' y el
+    -- reemplazo %%%% produce '%%'.)
+    return (text:gsub("%%", "%%%%"))
 end
 
 -- Inicia la compra commodity para un item especifico (row de la shopping list).

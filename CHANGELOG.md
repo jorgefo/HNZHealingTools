@@ -8,6 +8,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ---
 
+## [1.10.0] — 2026-06-01
+
+- **Miscellaneous**: new "Misc" sidebar section for small utilities. First feature: a **Combat Resurrection tracker** showing the group's shared battle-res charges in raids and Mythic+ — it works on any class (it does not depend on you having a brez spell). Shows the available count, or dims and counts down to the next charge when empty. **Shamans** also get a companion **Reincarnation** indicator (bright when ready, or a countdown to the next self-res).
+- **Miscellaneous**: the icons are always visible in raid / Mythic+ (in or out of combat). Reposition them with the **Move icon** button (drag freely; auto-unlocks the first time you enable the feature), tune icon/text size, and **right-click** an icon out of combat to jump straight to its settings.
+- **Raid Spells (A)**: the panel now only shows spells with a **base cooldown over 30 seconds**, filtering short-cooldown casts out of the healer cooldown list (applied on both broadcast and receive).
+- **Ready Check Panel**: class-buff checks are now **provider-aware**. If you are the one casting a group buff (e.g. Skyfury), the row stays red until every connected, alive group member actually has the buff — not just you — so you know to recast without checking each unit frame.
+- **Cursor**: stack and charge counts now display **from 1** (previously only at 2 or more), so the available stacks/charges are always visible.
+- **Fix**: the character ring no longer resets and loops back to the start when you enter combat for buffs whose duration the game restricts in combat (e.g. Astral Shift). The periodic rescan and combat in/out revalidation no longer wipe the Cooldown Manager `appliedAt` timestamp the in-combat timer depends on.
+- **Fix**: buying at the auction house no longer throws `invalid option in 'format'` when the confirmation popup contains a price-change indicator — the literal `%` is now escaped before the popup formats the text.
+
+---
+
 ## [1.9.0] — 2026-05-26
 
 - **Raid Spells (A)**: the panel now lists every healer in your raid who has the addon enabled, not just those who cast recently. Discovery is automatic via a hello protocol broadcast on group join and every 60s; stale entries are pruned after 3 minutes of silence.
