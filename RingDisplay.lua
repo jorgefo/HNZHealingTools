@@ -155,6 +155,10 @@ local function UpdateRings()
             elseif showWhen=="MISSING" then show=(status.status=="MISSING")
             elseif showWhen=="BELOW_STACKS" then show=(status.status=="MISSING") or (status.stacks<(entry.minStacks or 0))
             end
+            -- Aviso de expiracion: mostrar el ring tambien en la ventana de aviso
+            -- (aura activa por expirar dentro de loopExpireWarn seg), en sync con la
+            -- alarma de sonido aunque showWhen normalmente lo ocultaria.
+            if not show and ns.IsExpiryWarn(entry, status) then show=true end
 
             if show then
                 ringIndex = ringIndex + 1

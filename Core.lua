@@ -225,6 +225,25 @@ ns.PROFILE_DEFAULTS = {
         fontSize = 12,
         enabled = true,
     },
+    -- Fixed Panels: paneles de iconos anclados a puntos fijos de pantalla
+    -- (movibles por drag), con la MISMA logica de tracking/render que el cursor
+    -- pero sin seguir al mouse. Cada panel agrupa sus propias entries de spells
+    -- y auras. Ver FixedPanels.lua. enabled = master toggle (enabledKey del Config).
+    fixedPanels = {
+        enabled = false,
+        panels = {},  -- cada uno: {name, x, y, iconSize, iconSpacing, maxColumns,
+                      -- fontSize, opacity, visibility, spells={}, auras={}}
+    },
+    -- CDM Enhancer: efectos (glow/pulse/sonido/recolor/countdown) sobre los iconos
+    -- del Cooldown Manager nativo de Blizzard. NO dibuja iconos propios: engancha
+    -- los CooldownViewer y pone overlays. Ver CdmEnhancer.lua. enabled = master
+    -- toggle (enabledKey del Config).
+    cdmEnhancer = {
+        enabled = false,
+        rules = {},   -- cada una: {spellID, name, enabled, onExpiring, expireWarn,
+                      -- onReady, onLowStacks, minStacks, glow, pulse, sound,
+                      -- recolor, countdown}
+    },
     -- Ring display
     ringAuras = {},
     ringDisplay = {
@@ -287,6 +306,16 @@ ns.PROFILE_DEFAULTS = {
         showInCursor = true,
         showInRing = false,
         showInPulse = false,
+        -- Fixed display: 4to modo de placement. Iconos anclados a un punto fijo
+        -- de pantalla (movible por drag), independiente del cursor. Posicion como
+        -- offset desde el CENTER de UIParent.
+        showFixed = false,
+        fixedX = 0,
+        fixedY = 0,
+        -- Overrides SOLO para el fixed display (independiente del cursor):
+        fixedIconSize = 0,      -- 0 = usar el iconSize global del MRT
+        fixedHideCountdown = false,  -- ocultar el numero de countdown en PRE
+        fixedCountdownSize = 0,      -- 0 = tamaño por defecto (GameFontNormalHuge)
         ringIconSize = 36,   -- diametro del icono spell en el centro del ring overlay
         -- Sonido cuando la entry pasa a ACTIVE phase (trigger time alcanzado).
         soundEnabled = false,
@@ -498,10 +527,14 @@ function ns:MarkAuraDirty()
     ns._auraDirtyCursor = true
     ns._auraDirtyRing = true
     ns._auraDirtyPulse = true
+    ns._auraDirtyFixed = true
+    ns._dirtyCdm = true
 end
 function ns:MarkSpellDirty()
     ns._spellDirtyCursor = true
     ns._spellDirtyPulse = true
+    ns._spellDirtyFixed = true
+    ns._dirtyCdm = true
 end
 -- Estado inicial: todo dirty para forzar primer UpdateData/UpdateRings tras login.
 ns._auraDirtyCursor = true
@@ -509,6 +542,9 @@ ns._auraDirtyRing = true
 ns._auraDirtyPulse = true
 ns._spellDirtyCursor = true
 ns._spellDirtyPulse = true
+ns._auraDirtyFixed = true
+ns._spellDirtyFixed = true
+ns._dirtyCdm = true
 
 local eventFrame = CreateFrame("Frame")
 eventFrame:RegisterEvent("ADDON_LOADED")
@@ -597,7 +633,9 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
         end
 
         ns:InitCursorDisplay()
+        ns:InitFixedPanels()
         ns:InitRingDisplay()
+        ns:InitCdmEnhancer()
         ns:InitSpellMonitor()
         ns:InitAuraMonitor()
         ns:InitCooldownPulse()

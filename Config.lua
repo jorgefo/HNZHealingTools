@@ -157,11 +157,14 @@ end
 -- Add helpers
 -- ============================================================
 
-function ns:AddCursorSpell(input)
+-- `list` opcional: lista destino donde insertar la entry (default cursorSpells).
+-- Los Fixed Panels pasan panel.spells para reusar el mismo flujo de alta+dedup.
+function ns:AddCursorSpell(input, list)
+    list = list or ns.db.cursorSpells
     local spellID, name = ns.GetSpellIDFromInput(input)
     if not spellID then return false, ns.L["Spell not found: "]..tostring(input) end
-    if ns.FindSpellEntry(ns.db.cursorSpells, spellID) then return false, name..ns.L[" already monitored."] end
-    table.insert(ns.db.cursorSpells, {spellID=spellID, enabled=true, visibility="always"})
+    if ns.FindSpellEntry(list, spellID) then return false, name..ns.L[" already monitored."] end
+    table.insert(list, {spellID=spellID, enabled=true, visibility="always"})
     ns:MarkSpellDirty()
     return true, name
 end
@@ -178,14 +181,15 @@ local function FindItemEntry(list, itemID)
     return nil
 end
 
-function ns:AddCursorItem(input)
+function ns:AddCursorItem(input, list)
+    list = list or ns.db.cursorSpells
     local itemID = ns.GetItemIDFromInput(input)
     if not itemID then return false, ns.L["Item not found: "]..tostring(input) end
-    if FindItemEntry(ns.db.cursorSpells, itemID) then
+    if FindItemEntry(list, itemID) then
         local name = ns.GetItemDisplayInfo(itemID)
         return false, name..ns.L[" already monitored."]
     end
-    table.insert(ns.db.cursorSpells, {itemID=itemID, enabled=true, visibility="always"})
+    table.insert(list, {itemID=itemID, enabled=true, visibility="always"})
     ns:MarkSpellDirty()
     return true, ns.GetItemDisplayInfo(itemID)
 end
@@ -205,11 +209,12 @@ end
 
 ns._FindItemEntry = FindItemEntry
 
-function ns:AddCursorAura(input, unit, filter, showWhen, minStacks, manualDuration)
+function ns:AddCursorAura(input, unit, filter, showWhen, minStacks, manualDuration, list)
+    list = list or ns.db.cursorAuras
     local spellID, name = ns.GetSpellIDFromInput(input)
     if not spellID then return false, ns.L["Spell not found: "]..tostring(input) end
-    if ns.FindSpellEntry(ns.db.cursorAuras, spellID) then return false, name..ns.L[" already monitored."] end
-    table.insert(ns.db.cursorAuras, {spellID=spellID, unit=unit or "target", filter=filter or "HELPFUL", enabled=true, showWhen=showWhen or "ALWAYS", minStacks=minStacks or 0, manualDuration=manualDuration or 0, visibility="always"})
+    if ns.FindSpellEntry(list, spellID) then return false, name..ns.L[" already monitored."] end
+    table.insert(list, {spellID=spellID, unit=unit or "target", filter=filter or "HELPFUL", enabled=true, showWhen=showWhen or "ALWAYS", minStacks=minStacks or 0, manualDuration=manualDuration or 0, visibility="always"})
     ns:MarkAuraDirty()
     return true, name
 end
@@ -270,6 +275,17 @@ local SOUND_OPTIONS = {
     {label="Level Up",       value=888},
 }
 ns.SOUND_OPTIONS = SOUND_OPTIONS
+
+-- Canales de mezcla validos para PlaySound/PlaySoundFile. Declarado aqui (no mas
+-- abajo) para que los editores modales de cursor/ring auras lo resuelvan como
+-- upvalue; declararlo despues daba un nil global en esos closures.
+local SOUND_CHANNEL_OPTIONS = {
+    {label="Master",   value="Master"},
+    {label="SFX",      value="SFX"},
+    {label="Music",    value="Music"},
+    {label="Ambience", value="Ambience"},
+    {label="Dialog",   value="Dialog"},
+}
 
 local function PanelBackdrop(f)
     if not f.SetBackdrop then Mixin(f, BackdropTemplateMixin) end
@@ -489,10 +505,55 @@ ns._skin = {Button=SkinButton, EditBox=SkinEditBox, Check=SkinCheck, Slider=Skin
 -- Shared UI Widgets
 -- ============================================================
 
-local function CreateSlider(parent, label, min, max, step, getValue, setValue)
+-- Pequeño icono "?" que muestra `tooltipText` al hover. Pensado para etiquetar
+-- campos cuyo comportamiento no es obvio (e.g. el campo Duration: algunas auras
+-- restricted no exponen su duracion via API, hay que setearla manualmente).
+--
+-- Usamos `(?)` en texto plano y no Unicode (ⓘ U+24D8 / ℹ U+2139) porque la
+-- fuente del cliente WoW no incluye esos glifos en muchas locales y aparecen
+-- como rectangulos vacios. ASCII puro garantiza render correcto en todos lados.
+local function InfoHint(parent, tooltipText)
+    local f = CreateFrame("Frame", nil, parent)
+    f:SetSize(20, 16)
+    f:EnableMouse(true)
+    local fs = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    fs:SetAllPoints()
+    fs:SetText("|cff66ccff(?)|r")
+    fs:SetJustifyH("CENTER")
+    f:SetScript("OnEnter", function(s)
+        GameTooltip:SetOwner(s, "ANCHOR_RIGHT")
+        GameTooltip:SetText(tooltipText, 1, 1, 1, 1, true)
+        GameTooltip:Show()
+    end)
+    f:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    return f
+end
+
+-- Layout de dos columnas para los editores modales: la etiqueta (texto) va en la
+-- columna 1 a la izquierda con su (?) al final del texto, y el control (checkbox/
+-- dropdown/editbox/swatch) se ancla en la columna 2 a x=FIELD_COL2, centrado
+-- verticalmente respecto a la etiqueta. `y` es el TOPLEFT de la fila (negativo).
+-- Devuelve el FontString de la etiqueta por si el caller necesita anclar algo mas.
+local FIELD_COL2 = 260
+local function FieldRow(parent, y, text, tooltip, control)
+    local lbl = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    lbl:SetPoint("TOPLEFT", 4, y); lbl:SetText(text)
+    lbl:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+    if tooltip then local h = InfoHint(parent, tooltip); h:SetPoint("LEFT", lbl, "RIGHT", 4, 1) end
+    if control then
+        control:ClearAllPoints()
+        -- LEFT del control al centro vertical de la etiqueta (texto ~14px alto).
+        control:SetPoint("LEFT", parent, "TOPLEFT", FIELD_COL2, y - 7)
+    end
+    return lbl
+end
+
+local function CreateSlider(parent, label, min, max, step, getValue, setValue, tooltip)
     local c = CreateFrame("Frame",nil,parent); c:SetSize(280,45)
     local t = c:CreateFontString(nil,"OVERLAY","GameFontNormal"); t:SetPoint("TOPLEFT",0,0); t:SetText(label)
     t:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+    -- (?) opcional junto al titulo: explica la opcion al hacer hover.
+    if tooltip then local h = InfoHint(c, tooltip); h:SetPoint("LEFT", t, "RIGHT", 4, 1) end
     local s = CreateFrame("Slider",nil,c,"OptionsSliderTemplate"); s:SetPoint("TOPLEFT",0,-18); s:SetSize(200,12)
     s:SetMinMaxValues(min,max); s:SetValueStep(step); s:SetObeyStepOnDrag(true); s:SetValue(getValue())
     s.Low:SetText(min); s.High:SetText(max)
@@ -558,30 +619,6 @@ local function H(parent, text) local h=parent:CreateFontString(nil,"OVERLAY","Ga
 local function SubH(parent, text) local h=parent:CreateFontString(nil,"OVERLAY","GameFontNormal"); h:SetText(text); h:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b); return h end
 local function Btn(parent, text, w, h) return MakeButton(parent, w or 80, h or 22, text) end
 local function EditBox(parent, w) return MakeEditBox(parent, w or 180, 20) end
-
--- Pequeño icono "?" que muestra `tooltipText` al hover. Pensado para etiquetar
--- campos cuyo comportamiento no es obvio (e.g. el campo Duration: algunas auras
--- restricted no exponen su duracion via API, hay que setearla manualmente).
---
--- Usamos `(?)` en texto plano y no Unicode (ⓘ U+24D8 / ℹ U+2139) porque la
--- fuente del cliente WoW no incluye esos glifos en muchas locales y aparecen
--- como rectangulos vacios. ASCII puro garantiza render correcto en todos lados.
-local function InfoHint(parent, tooltipText)
-    local f = CreateFrame("Frame", nil, parent)
-    f:SetSize(20, 16)
-    f:EnableMouse(true)
-    local fs = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    fs:SetAllPoints()
-    fs:SetText("|cff66ccff(?)|r")
-    fs:SetJustifyH("CENTER")
-    f:SetScript("OnEnter", function(s)
-        GameTooltip:SetOwner(s, "ANCHOR_RIGHT")
-        GameTooltip:SetText(tooltipText, 1, 1, 1, 1, true)
-        GameTooltip:Show()
-    end)
-    f:SetScript("OnLeave", function() GameTooltip:Hide() end)
-    return f
-end
 
 -- Widget compartido: checkbox "Custom icon" + EditBox (file ID numerico) +
 -- preview live. Cuando esta checked y el ID es valido (>0), se persiste como
@@ -1630,12 +1667,18 @@ local function CreateCursorSpellEditor()
     local f=CreateEditorFrame("HNZHealingToolsCursorSpellEditor",ns.L["Cursor Spell"],500,500)
     local p=f.content
     local editingEntry
+    -- Context: lista destino + refresh. Default = lista del cursor; los Fixed
+    -- Panels los reasignan en cada Open* para apuntar a panel.spells y refrescar
+    -- su propia UI. Se reasigna en CADA Open → nunca queda estado stale.
+    local ctxList, ctxRefresh
+    local function CtxRefresh() if ctxRefresh then ctxRefresh() elseif ns.RefreshSpellList then ns.RefreshSpellList() end end
 
-    -- 3 tabs: General (identidad + filtros + specs/talent), Display (overrides
-    -- visuales + hide-flags) y Effects (pulse/sonido). Cada parametro numerico
-    -- es un slider (mismo helper que la config global) y va en su propia linea.
-    local tabs = CreateModalTabs(p, {ns.L["General"], ns.L["Display"], ns.L["Effects"]})
-    local t1, t2, t3 = tabs[1], tabs[2], tabs[3]
+    -- 4 tabs estilo WeakAuras: Trigger (identidad + condiciones de activacion),
+    -- Display (overrides visuales + hide-flags + icono), Load (specs/talento/
+    -- instancia/visibilidad) y Actions (pulse/sonido). Cada parametro numerico
+    -- visual es un slider (mismo helper que la config global) y va en su linea.
+    local tabs = CreateModalTabs(p, {ns.L["Trigger"], ns.L["Display"], ns.L["Load"], ns.L["Actions"]})
+    local t1, t2, t3, t4 = tabs[1], tabs[2], tabs[3], tabs[4]
 
     -- Draft state: solo para parametros con slider (visual overrides). Los
     -- inputs numericos discretos (min charges, stack text size) usan editbox
@@ -1643,66 +1686,69 @@ local function CreateCursorSpellEditor()
     -- agrega valor (size, opacity, position).
     local draft = {iconSize=0, opacity=0, offsetX=0, offsetY=0}
     local sliders = {}
-    local function MakeSlider(parent, label, mn, mx, step, key)
+    local function MakeSlider(parent, label, mn, mx, step, key, tooltip)
         local s = CreateSlider(parent, label, mn, mx, step,
             function() return draft[key] end,
-            function(v) draft[key] = v end)
+            function(v) draft[key] = v end, tooltip)
         table.insert(sliders, s)
         return s
     end
     local function RefreshSliders() for _,s in ipairs(sliders) do s:Refresh() end end
 
-    -- ============ Tab 1: General ============
-    local nl=t1:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); nl:SetPoint("TOPLEFT",4,-4); nl:SetText(ns.L["Spell name or ID:"])
-    local eb=EditBox(t1,360); eb:SetPoint("TOPLEFT",4,-22)
+    -- ============ Tab 1: Trigger ============
+    -- Dos columnas: etiqueta + (?) a la izquierda, control a la derecha (FIELD_COL2).
+    local nl=t1:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); nl:SetPoint("TOPLEFT",4,-4); nl:SetText(ns.L["Spell name or ID:"]); nl:SetTextColor(C_TEXT.r,C_TEXT.g,C_TEXT.b)
+    local nHint=InfoHint(t1, ns.L["Type the spell's name or its numeric spell ID. Start typing to autocomplete from your spellbook."]); nHint:SetPoint("LEFT",nl,"RIGHT",4,1)
+    local eb=EditBox(t1,380); eb:SetPoint("TOPLEFT",4,-24)
     AttachSpellAutocomplete(eb)
 
-    local mcl=t1:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); mcl:SetPoint("TOPLEFT",4,-56); mcl:SetText(ns.L["Show only when charges >=  (0=always):"])
-    local mce=EditBox(t1,50); mce:SetPoint("LEFT",mcl,"RIGHT",6,0); mce:SetText("0"); mce:SetNumeric(true)
-    local sfl=t1:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); sfl:SetPoint("TOPLEFT",4,-82); sfl:SetText(ns.L["Stack text size (0=default):"])
-    local sfe=EditBox(t1,40); sfe:SetPoint("LEFT",sfl,"RIGHT",6,0); sfe:SetText("0"); sfe:SetNumeric(true)
-
-    local visLbl=t1:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); visLbl:SetPoint("TOPLEFT",4,-108); visLbl:SetText(ns.L["Visibility:"])
-    local visDD=VisibilityDropdown(t1, function() return "always" end, function() end)
-    visDD:SetPoint("LEFT",visLbl,"RIGHT",6,0)
-
-    local spLabel=t1:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); spLabel:SetPoint("TOPLEFT",4,-140); spLabel:SetText(ns.L["Specs:"])
-    local spChk=SpecChecklist(t1); spChk:SetPoint("TOPLEFT",4,-156)
-    local tlLabel=t1:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); tlLabel:SetPoint("TOPLEFT",4,-188); tlLabel:SetText(ns.L["Required talent:"])
-    local tlPick=TalentPicker(t1); tlPick:SetPoint("TOPLEFT",4,-204)
-    local itLabel=t1:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); itLabel:SetPoint("TOPLEFT",4,-238); itLabel:SetText(ns.L["Show only in:"])
-    local itChk=InstanceTypeChecklist(t1); itChk:SetPoint("TOPLEFT",4,-254)
+    local mce=EditBox(t1,50); mce:SetText("0"); mce:SetNumeric(true)
+    FieldRow(t1, -58, ns.L["Show only when charges >=  (0=always):"], ns.L["Only show this icon when the spell has at least this many charges available. 0 = always show."], mce)
 
     -- ============ Tab 2: Display ============
-    -- Cada parametro en su propia linea (slider). 0 = usar valor global.
-    local isSlider = MakeSlider(t2, ns.L["Icon size (0=global):"], 0, 128, 1, "iconSize")
+    -- Sliders full-width (label + (?) arriba, barra debajo); el resto en dos columnas.
+    local isSlider = MakeSlider(t2, ns.L["Icon size (0=global):"], 0, 128, 1, "iconSize", ns.L["Override the global icon size for just this spell. 0 = use the global Cursor Display size."])
     isSlider:SetPoint("TOPLEFT",4,-4)
-    local opSlider = MakeSlider(t2, ns.L["Opacity (0=global, 0.1-1):"], 0, 1, 0.05, "opacity")
+    local opSlider = MakeSlider(t2, ns.L["Opacity (0=global, 0.1-1):"], 0, 1, 0.05, "opacity", ns.L["Override the global opacity for just this spell (0.1-1). 0 = use the global value."])
     opSlider:SetPoint("TOPLEFT",4,-54)
 
-    local cpCkPos=CreateFrame("CheckButton",nil,t2,"UICheckButtonTemplate"); cpCkPos:SetSize(18,18); cpCkPos:SetPoint("TOPLEFT",2,-108); SkinCheck(cpCkPos)
-    local cpLabelPos=t2:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); cpLabelPos:SetPoint("LEFT",cpCkPos,"RIGHT",6,0); cpLabelPos:SetText(ns.L["Custom position"]); cpLabelPos:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+    local cpCkPos=CreateFrame("CheckButton",nil,t2,"UICheckButtonTemplate"); cpCkPos:SetSize(18,18); SkinCheck(cpCkPos)
+    FieldRow(t2, -108, ns.L["Custom position"], ns.L["Detach this icon from the grid and place it at a fixed offset from the cursor (set the offsets below)."], cpCkPos)
 
-    local oxSlider = MakeSlider(t2, ns.L["Offset X"], -200, 200, 1, "offsetX")
+    local oxSlider = MakeSlider(t2, ns.L["Offset X"], -200, 200, 1, "offsetX", ns.L["Horizontal offset from the cursor, in pixels. Only used when 'Custom position' is on."])
     oxSlider:SetPoint("TOPLEFT",4,-136)
-    local oySlider = MakeSlider(t2, ns.L["Offset Y"], -200, 200, 1, "offsetY")
+    local oySlider = MakeSlider(t2, ns.L["Offset Y"], -200, 200, 1, "offsetY", ns.L["Vertical offset from the cursor, in pixels. Only used when 'Custom position' is on."])
     oySlider:SetPoint("TOPLEFT",4,-188)
 
-    local hcdCk=CreateFrame("CheckButton",nil,t2,"UICheckButtonTemplate"); hcdCk:SetSize(18,18); hcdCk:SetPoint("TOPLEFT",2,-240); SkinCheck(hcdCk)
-    local hcdLabel=t2:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); hcdLabel:SetPoint("LEFT",hcdCk,"RIGHT",6,0); hcdLabel:SetText(ns.L["Hide while on cooldown"]); hcdLabel:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-    local hsoCk=CreateFrame("CheckButton",nil,t2,"UICheckButtonTemplate"); hsoCk:SetSize(18,18); hsoCk:SetPoint("TOPLEFT",2,-264); SkinCheck(hsoCk)
-    local hsoLabel=t2:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); hsoLabel:SetPoint("LEFT",hsoCk,"RIGHT",6,0); hsoLabel:SetText(ns.L["Hide status overlay"]); hsoLabel:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-    local htCk=CreateFrame("CheckButton",nil,t2,"UICheckButtonTemplate"); htCk:SetSize(18,18); htCk:SetPoint("TOPLEFT",2,-288); SkinCheck(htCk)
-    local htLabel=t2:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); htLabel:SetPoint("LEFT",htCk,"RIGHT",6,0); htLabel:SetText(ns.L["Hide cooldown / duration timer"]); htLabel:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-    local iconF=CustomIconField(t2); iconF:SetPoint("TOPLEFT",2,-316)
+    local hcdCk=CreateFrame("CheckButton",nil,t2,"UICheckButtonTemplate"); hcdCk:SetSize(18,18); SkinCheck(hcdCk)
+    FieldRow(t2, -240, ns.L["Hide while on cooldown"], ns.L["Hide the icon completely while the spell is on cooldown, instead of dimming it."], hcdCk)
+    local hsoCk=CreateFrame("CheckButton",nil,t2,"UICheckButtonTemplate"); hsoCk:SetSize(18,18); SkinCheck(hsoCk)
+    FieldRow(t2, -266, ns.L["Hide status overlay"], ns.L["Hide the colored status tint (ready / cooldown / out-of-range) drawn over the icon."], hsoCk)
+    local htCk=CreateFrame("CheckButton",nil,t2,"UICheckButtonTemplate"); htCk:SetSize(18,18); SkinCheck(htCk)
+    FieldRow(t2, -292, ns.L["Hide cooldown / duration timer"], ns.L["Hide the countdown / duration text in the center of the icon."], htCk)
+    local sfe=EditBox(t2,50); sfe:SetText("0"); sfe:SetNumeric(true)
+    FieldRow(t2, -320, ns.L["Stack text size (0=default):"], ns.L["Font size of the charge count shown in the icon corner. 0 = use the default size."], sfe)
+    local iconF=CustomIconField(t2); iconF:SetPoint("TOPLEFT",2,-346)
 
-    -- ============ Tab 3: Effects ============
-    local cpCk=CreateFrame("CheckButton",nil,t3,"UICheckButtonTemplate"); cpCk:SetSize(18,18); cpCk:SetPoint("TOPLEFT",2,-4); SkinCheck(cpCk)
-    local cpLabel=t3:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); cpLabel:SetPoint("LEFT",cpCk,"RIGHT",6,0); cpLabel:SetText(ns.L["Pulse icon at screen center on ready"]); cpLabel:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-    local cpsCk=CreateFrame("CheckButton",nil,t3,"UICheckButtonTemplate"); cpsCk:SetSize(18,18); cpsCk:SetPoint("TOPLEFT",2,-28); SkinCheck(cpsCk)
-    local cpsLabel=t3:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); cpsLabel:SetPoint("LEFT",cpsCk,"RIGHT",6,0); cpsLabel:SetText(ns.L["Play sound on ready"]); cpsLabel:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-    local cpsPick=SoundPicker(t3,170); cpsPick:SetPoint("LEFT",cpsLabel,"RIGHT",10,0)
-    local cpsTest=Btn(t3,ns.L["Test"],60,18); cpsTest:SetPoint("LEFT",cpsPick,"RIGHT",6,0)
+    -- ============ Tab 3: Load ============
+    local visDD=VisibilityDropdown(t3, function() return "always" end, function() end)
+    FieldRow(t3, -4, ns.L["Visibility:"], ns.L["When this icon is shown: always, only in combat, or only out of combat."], visDD)
+
+    FieldRow(t3, -40, ns.L["Specs:"], ns.L["Limit this spell to the selected specs. None or all checked = every spec."])
+    local spChk=SpecChecklist(t3); spChk:SetPoint("TOPLEFT",4,-56)
+    FieldRow(t3, -88, ns.L["Required talent:"], ns.L["Only show when this talent is selected. Leave empty for no talent requirement."])
+    local tlPick=TalentPicker(t3); tlPick:SetPoint("TOPLEFT",4,-104)
+    FieldRow(t3, -140, ns.L["Show only in:"], ns.L["Limit this spell to the selected instance types. None or all checked = everywhere."])
+    local itChk=InstanceTypeChecklist(t3); itChk:SetPoint("TOPLEFT",4,-156)
+
+    -- ============ Tab 4: Actions ============
+    local cpCk=CreateFrame("CheckButton",nil,t4,"UICheckButtonTemplate"); cpCk:SetSize(18,18); SkinCheck(cpCk)
+    FieldRow(t4, -6, ns.L["Pulse icon at screen center on ready"], ns.L["Briefly flash a large copy of this icon at the center of the screen when the spell comes off cooldown."], cpCk)
+
+    local cpsCk=CreateFrame("CheckButton",nil,t4,"UICheckButtonTemplate"); cpsCk:SetSize(18,18); SkinCheck(cpsCk)
+    FieldRow(t4, -34, ns.L["Play sound on ready"], ns.L["Play a sound when the spell comes off cooldown. Pick the sound below and use Test to preview it."], cpsCk)
+    local cpsPick=SoundPicker(t4,170); cpsPick:SetPoint("TOPLEFT",4,-60)
+    local cpsTest=Btn(t4,ns.L["Test"],60,18); cpsTest:SetPoint("LEFT",cpsPick,"RIGHT",6,0)
     cpsTest:SetScript("OnClick",function()
         local sid=ns.GetSpellIDFromInput and ns.GetSpellIDFromInput(eb:GetText():trim()) or tonumber(eb:GetText())
         local info=sid and C_Spell.GetSpellInfo(sid) or nil
@@ -1739,20 +1785,21 @@ local function CreateCursorSpellEditor()
     end
 
     saveBtn:SetScript("OnClick",function()
+        local list = ctxList or ns.db.cursorSpells
         if editingEntry then
             ApplyToEntry(editingEntry); ns:MarkSpellDirty()
-            f:Hide(); if ns.RefreshSpellList then ns.RefreshSpellList() end
+            f:Hide(); CtxRefresh()
             return
         end
         local input=eb:GetText():trim()
         if input=="" then fb:SetTextColor(1,0.3,0.3); fb:SetText(ns.L["Enter a name/ID."]); return end
         local sid = ns.GetResolvedSpellID(eb)
         local addInput = sid and tostring(sid) or input
-        local ok,msg=ns:AddCursorSpell(addInput)
+        local ok,msg=ns:AddCursorSpell(addInput, list)
         if ok then
             sid = sid or ns.GetSpellIDFromInput(addInput)
-            if sid then local _,added=ns.FindSpellEntry(ns.db.cursorSpells,sid); if added then ApplyToEntry(added) end end
-            f:Hide(); if ns.RefreshSpellList then ns.RefreshSpellList() end
+            if sid then local _,added=ns.FindSpellEntry(list,sid); if added then ApplyToEntry(added) end end
+            f:Hide(); CtxRefresh()
         else fb:SetTextColor(1,0.3,0.3); fb:SetText(msg) end
     end)
     eb:SetScript("OnEnterPressed",function() saveBtn:Click() end)
@@ -1770,14 +1817,21 @@ local function CreateCursorSpellEditor()
         iconF:SetIconID(nil)
     end
 
+    -- list/refresh opcionales: contexto al que se agrega/edita la entry. Sin
+    -- argumentos → lista del cursor (comportamiento original).
+    local function SetCtx(list, refresh) ctxList = list; ctxRefresh = refresh end
+
     local editor={}
-    function editor:OpenAdd()
+    function editor:OpenAdd(list, refresh)
+        SetCtx(list, refresh)
         Reset(); f.title:SetText("|cff00ccff"..ns.L["New Cursor Spell"].."|r"); saveBtn:SetText(ns.L["Add"]); f:Show(); eb:SetFocus()
     end
-    function editor:OpenWithSpellID(id)
+    function editor:OpenWithSpellID(id, list, refresh)
+        SetCtx(list, refresh)
         Reset(); eb:SetText(tostring(id)); f.title:SetText("|cff00ccff"..ns.L["New Cursor Spell"].."|r"); saveBtn:SetText(ns.L["Add"]); f:Show()
     end
-    function editor:OpenEdit(entry)
+    function editor:OpenEdit(entry, list, refresh)
+        SetCtx(list, refresh)
         Reset(); editingEntry=entry
         local info=C_Spell.GetSpellInfo(entry.spellID)
         eb:SetText(tostring(entry.spellID)); eb:Disable()
@@ -1806,106 +1860,122 @@ local function CreateCursorSpellEditor()
 end
 
 local function CreateCursorAuraEditor()
-    local f=CreateEditorFrame("HNZHealingToolsCursorAuraEditor",ns.L["Cursor Aura"],500,546)
+    local f=CreateEditorFrame("HNZHealingToolsCursorAuraEditor",ns.L["Cursor Aura"],500,500)
     local p=f.content
     local editingEntry
+    -- Context: lista destino + refresh (default = cursorAuras). Ver editor de spells.
+    local ctxList, ctxRefresh
+    local function CtxRefresh() if ctxRefresh then ctxRefresh() elseif ns.RefreshCursorAuraList then ns.RefreshCursorAuraList() end end
+    local function SetCtx(list, refresh) ctxList = list; ctxRefresh = refresh end
 
-    -- 3 tabs: General (identidad + filtros + specs/talent), Display (overrides
-    -- visuales + hide-flags) y Effects (pulse/sonido). Sliders solo para los
+    -- 4 tabs estilo WeakAuras: Trigger (identidad + filtros + triggers manuales),
+    -- Display (overrides visuales + hide-flags + icono), Load (specs/talento/
+    -- instancia/visibilidad) y Actions (pulse/sonido). Sliders solo para los
     -- overrides visuales (size/opacity/offset); todo lo demas en text input.
-    local tabs = CreateModalTabs(p, {ns.L["General"], ns.L["Display"], ns.L["Effects"]})
-    local t1, t2, t3 = tabs[1], tabs[2], tabs[3]
+    local tabs = CreateModalTabs(p, {ns.L["Trigger"], ns.L["Display"], ns.L["Load"], ns.L["Actions"]})
+    local t1, t2, t3, t4 = tabs[1], tabs[2], tabs[3], tabs[4]
 
     local draft = {iconSize=0, opacity=0, offsetX=0, offsetY=0}
     local sliders = {}
-    local function MakeSlider(parent, label, mn, mx, step, key)
+    local function MakeSlider(parent, label, mn, mx, step, key, tooltip)
         local s = CreateSlider(parent, label, mn, mx, step,
             function() return draft[key] end,
-            function(v) draft[key] = v end)
+            function(v) draft[key] = v end, tooltip)
         table.insert(sliders, s)
         return s
     end
     local function RefreshSliders() for _,s in ipairs(sliders) do s:Refresh() end end
 
-    -- ============ Tab 1: General ============
-    local nl=t1:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); nl:SetPoint("TOPLEFT",4,-4); nl:SetText(ns.L["Aura name or ID:"])
-    local eb=EditBox(t1,380); eb:SetPoint("TOPLEFT",4,-22)
+    -- ============ Tab 1: Trigger ============
+    -- Dos columnas: etiqueta + (?) a la izquierda, control a la derecha (FIELD_COL2).
+    local nl=t1:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); nl:SetPoint("TOPLEFT",4,-4); nl:SetText(ns.L["Aura name or ID:"]); nl:SetTextColor(C_TEXT.r,C_TEXT.g,C_TEXT.b)
+    local nHint=InfoHint(t1, ns.L["Type the aura's name or its numeric spell ID. Start typing to autocomplete from your spellbook."]); nHint:SetPoint("LEFT",nl,"RIGHT",4,1)
+    local eb=EditBox(t1,380); eb:SetPoint("TOPLEFT",4,-24)
     AttachSpellAutocomplete(eb)
 
-    local ul=t1:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); ul:SetPoint("TOPLEFT",4,-52); ul:SetText(ns.L["Unit:"])
-    local ud=Dropdown(t1,100,{{label=ns.L["Target"],value="target"},{label=ns.L["Player"],value="player"},{label=ns.L["Focus"],value="focus"},{label=ns.L["Mouseover"],value="mouseover"},{label=ns.L["Pet"],value="pet"}},"target")
-    ud:SetPoint("TOPLEFT",4,-70)
-    local fl=t1:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); fl:SetPoint("LEFT",ud,"RIGHT",14,0); fl:SetText(ns.L["Type:"])
-    local fd=Dropdown(t1,80,{{label=ns.L["Buff"],value="HELPFUL"},{label=ns.L["Debuff"],value="HARMFUL"}},"HELPFUL"); fd:SetPoint("LEFT",fl,"RIGHT",4,0)
+    local ud=Dropdown(t1,140,{{label=ns.L["Target"],value="target"},{label=ns.L["Player"],value="player"},{label=ns.L["Focus"],value="focus"},{label=ns.L["Mouseover"],value="mouseover"},{label=ns.L["Pet"],value="pet"}},"target")
+    FieldRow(t1, -58, ns.L["Unit:"], ns.L["Which unit to watch for this aura: target, player, focus, mouseover or pet."], ud)
 
-    local swl=t1:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); swl:SetPoint("TOPLEFT",4,-100); swl:SetText(ns.L["Show:"])
+    local fd=Dropdown(t1,140,{{label=ns.L["Buff"],value="HELPFUL"},{label=ns.L["Debuff"],value="HARMFUL"}},"HELPFUL")
+    FieldRow(t1, -90, ns.L["Type:"], ns.L["Whether to track a Buff (HELPFUL) or a Debuff (HARMFUL). Must match the aura's real type or it won't be found."], fd)
+
     local swd=Dropdown(t1,140,{{label=ns.L["Always"],value="ALWAYS"},{label=ns.L["Only missing"],value="MISSING"},{label=ns.L["Only active"],value="ACTIVE"},{label=ns.L["Below stacks"],value="BELOW_STACKS"}},"ALWAYS")
-    swd:SetPoint("TOPLEFT",4,-118)
-    local skl=t1:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); skl:SetPoint("LEFT",swd,"RIGHT",14,0); skl:SetText(ns.L["Min stacks:"])
-    local ske=EditBox(t1,40); ske:SetPoint("LEFT",skl,"RIGHT",4,0); ske:SetText("0"); ske:SetNumeric(true)
+    FieldRow(t1, -122, ns.L["Show:"], ns.L["When to show the icon: Always, only when Missing, only when Active, or when stacks are Below the threshold below."], swd)
 
-    local dl=t1:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); dl:SetPoint("TOPLEFT",4,-154); dl:SetText(ns.L["Duration (sec, 0=auto):"])
-    local de=EditBox(t1,50); de:SetPoint("LEFT",dl,"RIGHT",6,0); de:SetText("0"); de:SetNumeric(true)
-    local dHint=InfoHint(t1, ns.L["Some auras (item buffs, restricted effects in Midnight) don't expose their duration via API. If the icon/ring shows but doesn't count down, enter the real duration in seconds here (check Wowhead for the exact value)."]); dHint:SetPoint("LEFT",de,"RIGHT",6,0)
-    -- Manual trigger fields (mismo row que Duration). Para auras "fully restricted"
-    -- que no aparecen en ningun path de deteccion, el usuario configura un
-    -- spellID o itemID disparador y nosotros sintetizamos el estado ACTIVE al
-    -- detectar el cast/uso. Requiere manualDuration > 0 (sin duracion no hay
-    -- forma de saber cuando el aura "expira").
-    local tsl=t1:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); tsl:SetPoint("LEFT",dHint,"RIGHT",10,0); tsl:SetText(ns.L["Trigger spell:"])
-    local tse=EditBox(t1,55); tse:SetPoint("LEFT",tsl,"RIGHT",4,0); tse:SetText("0"); tse:SetNumeric(true)
-    local til=t1:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); til:SetPoint("LEFT",tse,"RIGHT",10,0); til:SetText(ns.L["Trigger item:"])
-    local tie=EditBox(t1,60); tie:SetPoint("LEFT",til,"RIGHT",4,0); tie:SetText("0"); tie:SetNumeric(true)
-    local tHint=InfoHint(t1, ns.L["Workaround for fully-restricted auras: when the trigger spell is cast OR the trigger item is used, the aura is treated as ACTIVE for the manual duration above. Use only when the standard detection paths fail (verify with /hht auradebug)."]); tHint:SetPoint("LEFT",tie,"RIGHT",6,0)
-    -- External trigger key: macro/other-addon entry-point. Cuando se llama
-    -- /hht trigger <key> o HNZHealingTools.Trigger(key), las entries con este
-    -- triggerKey se marcan ACTIVE durante manualDuration segundos.
-    local tkl=t1:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); tkl:SetPoint("TOPLEFT",4,-180); tkl:SetText(ns.L["Trigger key:"])
-    local tke=EditBox(t1,140); tke:SetPoint("LEFT",tkl,"RIGHT",4,0)
-    local tkHint=InfoHint(t1, ns.L["Optional. Fire this aura from a macro: /hht trigger <key>. Requires Duration > 0. Case-insensitive."]); tkHint:SetPoint("LEFT",tke,"RIGHT",6,0)
-    local sfl=t1:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); sfl:SetPoint("TOPLEFT",4,-204); sfl:SetText(ns.L["Stack text size (0=default):"])
-    local sfe=EditBox(t1,40); sfe:SetPoint("LEFT",sfl,"RIGHT",6,0); sfe:SetText("0"); sfe:SetNumeric(true)
+    local ske=EditBox(t1,50); ske:SetText("0"); ske:SetNumeric(true)
+    FieldRow(t1, -154, ns.L["Min stacks:"], ns.L["Used with the 'Below stacks' mode: show the icon while the aura has fewer than this many stacks."], ske)
 
-    local visLbl=t1:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); visLbl:SetPoint("TOPLEFT",4,-230); visLbl:SetText(ns.L["Visibility:"])
-    local visDD=VisibilityDropdown(t1, function() return "always" end, function() end)
-    visDD:SetPoint("LEFT",visLbl,"RIGHT",6,0)
+    local de=EditBox(t1,50); de:SetText("0"); de:SetNumeric(true)
+    FieldRow(t1, -186, ns.L["Duration (sec, 0=auto):"], ns.L["Some auras (item buffs, restricted effects in Midnight) don't expose their duration via API. If the icon/ring shows but doesn't count down, enter the real duration in seconds here (check Wowhead for the exact value)."], de)
 
-    local spLabel=t1:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); spLabel:SetPoint("TOPLEFT",4,-260); spLabel:SetText(ns.L["Specs:"])
-    local spChk=SpecChecklist(t1); spChk:SetPoint("TOPLEFT",4,-276)
-    local tlLabel=t1:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); tlLabel:SetPoint("TOPLEFT",4,-308); tlLabel:SetText(ns.L["Required talent:"])
-    local tlPick=TalentPicker(t1); tlPick:SetPoint("TOPLEFT",4,-324)
-    local itLabel=t1:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); itLabel:SetPoint("TOPLEFT",4,-356); itLabel:SetText(ns.L["Show only in:"])
-    local itChk=InstanceTypeChecklist(t1); itChk:SetPoint("TOPLEFT",4,-372)
+    -- Manual trigger fields. Para auras "fully restricted" que no aparecen en ningun
+    -- path de deteccion; sintetizamos ACTIVE al detectar el cast/uso (req. Duration>0).
+    local tse=EditBox(t1,60); tse:SetText("0"); tse:SetNumeric(true)
+    FieldRow(t1, -218, ns.L["Trigger spell:"], ns.L["Manual trigger: when this spell is cast, the aura is treated as ACTIVE for the Duration above. Use only for fully-restricted auras the normal detection can't see (verify with /hht auradebug)."], tse)
+
+    local tie=EditBox(t1,60); tie:SetText("0"); tie:SetNumeric(true)
+    FieldRow(t1, -250, ns.L["Trigger item:"], ns.L["Manual trigger: when this item is used, the aura is treated as ACTIVE for the Duration above. Requires Duration > 0."], tie)
+
+    local tke=EditBox(t1,140)
+    FieldRow(t1, -282, ns.L["Trigger key:"], ns.L["Optional. Fire this aura from a macro: /hht trigger <key>. Requires Duration > 0. Case-insensitive."], tke)
 
     -- ============ Tab 2: Display ============
-    local isSlider = MakeSlider(t2, ns.L["Icon size (0=global):"], 0, 128, 1, "iconSize")
+    -- Sliders full-width (label + (?) arriba, barra debajo); el resto en dos columnas.
+    local isSlider = MakeSlider(t2, ns.L["Icon size (0=global):"], 0, 128, 1, "iconSize", ns.L["Override the global icon size for just this aura. 0 = use the global Cursor Display size."])
     isSlider:SetPoint("TOPLEFT",4,-4)
-    local opSlider = MakeSlider(t2, ns.L["Opacity (0=global, 0.1-1):"], 0, 1, 0.05, "opacity")
+    local opSlider = MakeSlider(t2, ns.L["Opacity (0=global, 0.1-1):"], 0, 1, 0.05, "opacity", ns.L["Override the global opacity for just this aura (0.1-1). 0 = use the global value."])
     opSlider:SetPoint("TOPLEFT",4,-54)
 
-    local cpCkPos=CreateFrame("CheckButton",nil,t2,"UICheckButtonTemplate"); cpCkPos:SetSize(18,18); cpCkPos:SetPoint("TOPLEFT",2,-108); SkinCheck(cpCkPos)
-    local cpLabelPos=t2:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); cpLabelPos:SetPoint("LEFT",cpCkPos,"RIGHT",6,0); cpLabelPos:SetText(ns.L["Custom position"]); cpLabelPos:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+    local cpCkPos=CreateFrame("CheckButton",nil,t2,"UICheckButtonTemplate"); cpCkPos:SetSize(18,18); SkinCheck(cpCkPos)
+    FieldRow(t2, -108, ns.L["Custom position"], ns.L["Detach this icon from the grid and place it at a fixed offset from the cursor (set the offsets below)."], cpCkPos)
 
-    local oxSlider = MakeSlider(t2, ns.L["Offset X"], -200, 200, 1, "offsetX")
+    local oxSlider = MakeSlider(t2, ns.L["Offset X"], -200, 200, 1, "offsetX", ns.L["Horizontal offset from the cursor, in pixels. Only used when 'Custom position' is on."])
     oxSlider:SetPoint("TOPLEFT",4,-136)
-    local oySlider = MakeSlider(t2, ns.L["Offset Y"], -200, 200, 1, "offsetY")
+    local oySlider = MakeSlider(t2, ns.L["Offset Y"], -200, 200, 1, "offsetY", ns.L["Vertical offset from the cursor, in pixels. Only used when 'Custom position' is on."])
     oySlider:SetPoint("TOPLEFT",4,-188)
 
-    local hsoCk=CreateFrame("CheckButton",nil,t2,"UICheckButtonTemplate"); hsoCk:SetSize(18,18); hsoCk:SetPoint("TOPLEFT",2,-240); SkinCheck(hsoCk)
-    local hsoLabel=t2:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); hsoLabel:SetPoint("LEFT",hsoCk,"RIGHT",6,0); hsoLabel:SetText(ns.L["Hide status overlay"]); hsoLabel:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-    local htCk=CreateFrame("CheckButton",nil,t2,"UICheckButtonTemplate"); htCk:SetSize(18,18); htCk:SetPoint("TOPLEFT",2,-264); SkinCheck(htCk)
-    local htLabel=t2:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); htLabel:SetPoint("LEFT",htCk,"RIGHT",6,0); htLabel:SetText(ns.L["Hide timer"]); htLabel:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-    local iconF=CustomIconField(t2); iconF:SetPoint("TOPLEFT",2,-292)
+    local hsoCk=CreateFrame("CheckButton",nil,t2,"UICheckButtonTemplate"); hsoCk:SetSize(18,18); SkinCheck(hsoCk)
+    FieldRow(t2, -240, ns.L["Hide status overlay"], ns.L["Hide the colored status tint (ready / cooldown / out-of-range) drawn over the icon."], hsoCk)
+    local htCk=CreateFrame("CheckButton",nil,t2,"UICheckButtonTemplate"); htCk:SetSize(18,18); SkinCheck(htCk)
+    FieldRow(t2, -266, ns.L["Hide timer"], ns.L["Hide the countdown / duration text in the center of the icon."], htCk)
+    local sfe=EditBox(t2,50); sfe:SetText("0"); sfe:SetNumeric(true)
+    FieldRow(t2, -294, ns.L["Stack text size (0=default):"], ns.L["Font size of the stack count shown in the icon corner. 0 = use the default size."], sfe)
+    local iconF=CustomIconField(t2); iconF:SetPoint("TOPLEFT",2,-322)
 
-    -- ============ Tab 3: Effects ============
-    local cpCk=CreateFrame("CheckButton",nil,t3,"UICheckButtonTemplate"); cpCk:SetSize(18,18); cpCk:SetPoint("TOPLEFT",2,-4); SkinCheck(cpCk)
-    local cpLabel=t3:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); cpLabel:SetPoint("LEFT",cpCk,"RIGHT",6,0); cpLabel:SetText(ns.L["Pulse icon at screen center on activation"]); cpLabel:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+    -- ============ Tab 3: Load ============
+    local visDD=VisibilityDropdown(t3, function() return "always" end, function() end)
+    FieldRow(t3, -4, ns.L["Visibility:"], ns.L["When this aura is shown: always, only in combat, or only out of combat."], visDD)
 
-    local sndCk=CreateFrame("CheckButton",nil,t3,"UICheckButtonTemplate"); sndCk:SetSize(18,18); sndCk:SetPoint("TOPLEFT",2,-28); SkinCheck(sndCk)
-    local sndLabel=t3:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); sndLabel:SetPoint("LEFT",sndCk,"RIGHT",6,0); sndLabel:SetText(ns.L["Play sound on activation"]); sndLabel:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-    local sndPick=SoundPicker(t3,170); sndPick:SetPoint("LEFT",sndLabel,"RIGHT",10,0)
-    local sndTest=Btn(t3,ns.L["Test"],60,18); sndTest:SetPoint("LEFT",sndPick,"RIGHT",6,0)
-    sndTest:SetScript("OnClick",function() ns.PlayAuraSound(sndPick:GetSoundName()) end)
+    -- Checklists anchos: etiqueta + (?) arriba, widget debajo (no caben en columna 2).
+    FieldRow(t3, -40, ns.L["Specs:"], ns.L["Limit this aura to the selected specs. None or all checked = every spec."])
+    local spChk=SpecChecklist(t3); spChk:SetPoint("TOPLEFT",4,-56)
+    FieldRow(t3, -88, ns.L["Required talent:"], ns.L["Only show when this talent is selected. Leave empty for no talent requirement."])
+    local tlPick=TalentPicker(t3); tlPick:SetPoint("TOPLEFT",4,-104)
+    FieldRow(t3, -140, ns.L["Show only in:"], ns.L["Limit this aura to the selected instance types. None or all checked = everywhere."])
+    local itChk=InstanceTypeChecklist(t3); itChk:SetPoint("TOPLEFT",4,-156)
+
+    -- ============ Tab 4: Actions ============
+    local cpCk=CreateFrame("CheckButton",nil,t4,"UICheckButtonTemplate"); cpCk:SetSize(18,18); SkinCheck(cpCk)
+    FieldRow(t4, -6, ns.L["Pulse icon at screen center on activation"], ns.L["Briefly flash a large copy of this icon at the center of the screen when the aura becomes active."], cpCk)
+
+    local sndCk=CreateFrame("CheckButton",nil,t4,"UICheckButtonTemplate"); sndCk:SetSize(18,18); SkinCheck(sndCk)
+    FieldRow(t4, -34, ns.L["Play sound on activation"], ns.L["Play a sound when the aura becomes active. Pick the sound below and use Test to preview it."], sndCk)
+    -- Canal de mezcla (declarado antes del Test para que su OnClick lo capture).
+    local chDD=Dropdown(t4,110,SOUND_CHANNEL_OPTIONS,"Master")
+    FieldRow(t4, -92, ns.L["Channel:"], ns.L["Sound output channel. Master plays even when in-game sound-effect volume is muted."], chDD)
+    -- Picker + Test en su propia fila (control ancho).
+    local sndPick=SoundPicker(t4,170); sndPick:SetPoint("TOPLEFT",4,-60)
+    local sndTest=Btn(t4,ns.L["Test"],60,18); sndTest:SetPoint("LEFT",sndPick,"RIGHT",6,0)
+    sndTest:SetScript("OnClick",function() ns.PlayAuraSound(sndPick:GetSoundName(), chDD:GetValue()) end)
+
+    local loopCk=CreateFrame("CheckButton",nil,t4,"UICheckButtonTemplate"); loopCk:SetSize(18,18); SkinCheck(loopCk)
+    FieldRow(t4, -120, ns.L["Loop sound"], ns.L["Repeat the sound while the aura stays active, at the interval below."], loopCk)
+
+    local liEb=EditBox(t4,50); liEb:SetText("2")
+    FieldRow(t4, -148, ns.L["Loop interval (s):"], ns.L["Seconds between repeats while 'Loop sound' is on."], liEb)
+
+    local expEb=EditBox(t4,50); expEb:SetText("0")
+    FieldRow(t4, -176, ns.L["Alert before expiry (s):"], ns.L["Play the sound and show the timer this many seconds before the aura expires. 0 = off."], expEb)
 
     local fb=p:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall"); fb:SetPoint("BOTTOMLEFT",4,4); fb:SetPoint("BOTTOMRIGHT",-4,4); fb:SetJustifyH("LEFT")
     local saveBtn=Btn(f,ns.L["Save"],100,26); saveBtn:SetPoint("BOTTOMRIGHT",-110,8)
@@ -1924,6 +1994,10 @@ local function CreateCursorAuraEditor()
         e.playSound=sndCk:GetChecked() and true or false
         e.soundName=sndPick:GetSoundName()
         e.soundID=nil  -- legacy field cleared cuando ya hay soundName
+        e.soundChannel=chDD:GetValue() or "Master"
+        e.loopSound=loopCk:GetChecked() and true or false
+        local _li=tonumber(liEb:GetText()); e.loopInterval=(_li and _li>0) and _li or nil
+        local _ew=tonumber(expEb:GetText()); e.loopExpireWarn=(_ew and _ew>0) and _ew or nil
         e.visibility=visDD:GetValue() or "always"
         e.iconSize=(draft.iconSize>0) and draft.iconSize or nil
         e.opacity=(draft.opacity>0) and draft.opacity or nil
@@ -1941,20 +2015,21 @@ local function CreateCursorAuraEditor()
     end
 
     saveBtn:SetScript("OnClick",function()
+        local list = ctxList or ns.db.cursorAuras
         if editingEntry then
             ApplyToEntry(editingEntry); ns:MarkAuraDirty()
-            f:Hide(); if ns.RefreshCursorAuraList then ns.RefreshCursorAuraList() end
+            f:Hide(); CtxRefresh()
             return
         end
         local input=eb:GetText():trim()
         if input=="" then fb:SetTextColor(1,0.3,0.3); fb:SetText(ns.L["Enter a name/ID."]); return end
         local sid = ns.GetResolvedSpellID(eb)
         local addInput = sid and tostring(sid) or input
-        local ok,msg=ns:AddCursorAura(addInput,ud:GetValue(),fd:GetValue(),swd:GetValue(),tonumber(ske:GetText()) or 0,tonumber(de:GetText()) or 0)
+        local ok,msg=ns:AddCursorAura(addInput,ud:GetValue(),fd:GetValue(),swd:GetValue(),tonumber(ske:GetText()) or 0,tonumber(de:GetText()) or 0, list)
         if ok then
             sid = sid or ns.GetSpellIDFromInput(addInput)
-            if sid then local _,added=ns.FindSpellEntry(ns.db.cursorAuras,sid); if added then ApplyToEntry(added) end end
-            f:Hide(); if ns.RefreshCursorAuraList then ns.RefreshCursorAuraList() end
+            if sid then local _,added=ns.FindSpellEntry(list,sid); if added then ApplyToEntry(added) end end
+            f:Hide(); CtxRefresh()
         else fb:SetTextColor(1,0.3,0.3); fb:SetText(msg) end
     end)
     eb:SetScript("OnEnterPressed",function() saveBtn:Click() end)
@@ -1966,6 +2041,7 @@ local function CreateCursorAuraEditor()
         tse:SetText("0"); tie:SetText("0"); tke:SetText("")
         hsoCk:SetChecked(false); htCk:SetChecked(false); cpCk:SetChecked(false)
         sndCk:SetChecked(false); sndPick:SetSoundName("Default")
+        chDD:SetValue("Master"); loopCk:SetChecked(false); liEb:SetText("2"); expEb:SetText("0")
         spChk:SetSpecs(nil); tlPick:SetSpellID(nil); itChk:SetTypes(nil); fb:SetText("")
         visDD:SetValue("always")
         cpCkPos:SetChecked(false)
@@ -1975,13 +2051,16 @@ local function CreateCursorAuraEditor()
     end
 
     local editor={}
-    function editor:OpenAdd()
+    function editor:OpenAdd(list, refresh)
+        SetCtx(list, refresh)
         Reset(); f.title:SetText(ns.L["New Cursor Aura"]); saveBtn:SetText(ns.L["Add"]); f:Show(); eb:SetFocus()
     end
-    function editor:OpenWithSpellID(id)
+    function editor:OpenWithSpellID(id, list, refresh)
+        SetCtx(list, refresh)
         Reset(); eb:SetText(tostring(id)); f.title:SetText(ns.L["New Cursor Aura"]); saveBtn:SetText(ns.L["Add"]); f:Show()
     end
-    function editor:OpenEdit(entry)
+    function editor:OpenEdit(entry, list, refresh)
+        SetCtx(list, refresh)
         Reset(); editingEntry=entry
         local info=C_Spell.GetSpellInfo(entry.spellID)
         eb:SetText(tostring(entry.spellID)); eb:Disable()
@@ -1998,6 +2077,10 @@ local function CreateCursorAuraEditor()
         cpCk:SetChecked(entry.cdPulse and true or false)
         sndCk:SetChecked(entry.playSound and true or false)
         sndPick:SetSoundName(entry.soundName or (entry.soundID and tostring(entry.soundID)) or "Default")
+        chDD:SetValue(entry.soundChannel or "Master")
+        loopCk:SetChecked(entry.loopSound and true or false)
+        liEb:SetText(tostring(entry.loopInterval or 2))
+        expEb:SetText(tostring(entry.loopExpireWarn or 0))
         visDD:SetValue(entry.visibility or "always")
         cpCkPos:SetChecked(entry.useCustomPosition and true or false)
         draft.iconSize=tonumber(entry.iconSize) or 0
@@ -2015,75 +2098,90 @@ local function CreateCursorAuraEditor()
 end
 
 local function CreateRingAuraEditor()
-    local f=CreateEditorFrame("HNZHealingToolsRingAuraEditor",ns.L["Ring Aura"],500,566)
+    local f=CreateEditorFrame("HNZHealingToolsRingAuraEditor",ns.L["Ring Aura"],500,500)
     local p=f.content
     local editingEntry
     local pc=ns.DeepCopy(ns.DEFAULT_COLORS[1])
 
-    -- 2 tabs: General (identidad + filtros + color + show-icon + specs/talent)
-    -- y Effects (pulse + sound). Ring Aura no necesita tab Display: el rendering
-    -- en anillo no soporta los overrides per-entry de size/opacity/position que
-    -- existen en Cursor Display.
-    local tabs = CreateModalTabs(p, {ns.L["General"], ns.L["Effects"]})
-    local t1, t2 = tabs[1], tabs[2]
+    -- 4 tabs estilo WeakAuras: Trigger (identidad + filtros + triggers manuales),
+    -- Display (color + show-icon + icono custom), Load (specs/talento/instancia)
+    -- y Actions (pulse + sound). Ring Aura no expone overrides de size/opacity/
+    -- position per-entry (el rendering en anillo no los soporta), por eso su tab
+    -- Display solo tiene color e icono.
+    local tabs = CreateModalTabs(p, {ns.L["Trigger"], ns.L["Display"], ns.L["Load"], ns.L["Actions"]})
+    local t1, t2, t3, t4 = tabs[1], tabs[2], tabs[3], tabs[4]
 
-    -- ============ Tab 1: General ============
-    local nl=t1:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); nl:SetPoint("TOPLEFT",4,-4); nl:SetText(ns.L["Aura name or ID:"])
-    local eb=EditBox(t1,380); eb:SetPoint("TOPLEFT",4,-22)
+    -- ============ Tab 1: Trigger ============
+    -- Dos columnas: etiqueta + (?) a la izquierda, control a la derecha (FIELD_COL2).
+    local nl=t1:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); nl:SetPoint("TOPLEFT",4,-4); nl:SetText(ns.L["Aura name or ID:"]); nl:SetTextColor(C_TEXT.r,C_TEXT.g,C_TEXT.b)
+    local nHint=InfoHint(t1, ns.L["Type the aura's name or its numeric spell ID. Start typing to autocomplete from your spellbook."]); nHint:SetPoint("LEFT",nl,"RIGHT",4,1)
+    local eb=EditBox(t1,380); eb:SetPoint("TOPLEFT",4,-24)
     AttachSpellAutocomplete(eb)
 
-    local ul=t1:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); ul:SetPoint("TOPLEFT",4,-52); ul:SetText(ns.L["Unit:"])
-    local ud=Dropdown(t1,100,{{label=ns.L["Player"],value="player"},{label=ns.L["Target"],value="target"},{label=ns.L["Focus"],value="focus"},{label=ns.L["Mouseover"],value="mouseover"},{label=ns.L["Pet"],value="pet"}},"player")
-    ud:SetPoint("TOPLEFT",4,-70)
-    local fl=t1:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); fl:SetPoint("LEFT",ud,"RIGHT",14,0); fl:SetText(ns.L["Type:"])
-    local fd=Dropdown(t1,80,{{label=ns.L["Buff"],value="HELPFUL"},{label=ns.L["Debuff"],value="HARMFUL"}},"HELPFUL"); fd:SetPoint("LEFT",fl,"RIGHT",4,0)
+    local ud=Dropdown(t1,140,{{label=ns.L["Player"],value="player"},{label=ns.L["Target"],value="target"},{label=ns.L["Focus"],value="focus"},{label=ns.L["Mouseover"],value="mouseover"},{label=ns.L["Pet"],value="pet"}},"player")
+    FieldRow(t1, -58, ns.L["Unit:"], ns.L["Which unit to watch for this aura: target, player, focus, mouseover or pet."], ud)
 
-    local swl=t1:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); swl:SetPoint("TOPLEFT",4,-100); swl:SetText(ns.L["Show:"])
+    local fd=Dropdown(t1,140,{{label=ns.L["Buff"],value="HELPFUL"},{label=ns.L["Debuff"],value="HARMFUL"}},"HELPFUL")
+    FieldRow(t1, -90, ns.L["Type:"], ns.L["Whether to track a Buff (HELPFUL) or a Debuff (HARMFUL). Must match the aura's real type or it won't be found."], fd)
+
     local swd=Dropdown(t1,140,{{label=ns.L["Active only"],value="ACTIVE"},{label=ns.L["Always"],value="ALWAYS"},{label=ns.L["Missing only"],value="MISSING"},{label=ns.L["Below stacks"],value="BELOW_STACKS"}},"ACTIVE")
-    swd:SetPoint("TOPLEFT",4,-118)
-    local skl=t1:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); skl:SetPoint("LEFT",swd,"RIGHT",14,0); skl:SetText(ns.L["Min stacks:"])
-    local ske=EditBox(t1,40); ske:SetPoint("LEFT",skl,"RIGHT",4,0); ske:SetText("0"); ske:SetNumeric(true)
+    FieldRow(t1, -122, ns.L["Show:"], ns.L["When to show the ring: only when Active, Always, only when Missing, or when stacks are Below the threshold below."], swd)
 
-    local dl=t1:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); dl:SetPoint("TOPLEFT",4,-150); dl:SetText(ns.L["Duration (sec, 0=auto):"])
-    local de=EditBox(t1,50); de:SetPoint("LEFT",dl,"RIGHT",6,0); de:SetText("0"); de:SetNumeric(true)
-    local dHint=InfoHint(t1, ns.L["Some auras (item buffs, restricted effects in Midnight) don't expose their duration via API. If the icon/ring shows but doesn't count down, enter the real duration in seconds here (check Wowhead for the exact value)."]); dHint:SetPoint("LEFT",de,"RIGHT",6,0)
-    local cl=t1:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); cl:SetPoint("LEFT",dHint,"RIGHT",10,0); cl:SetText(ns.L["Color:"])
-    local cs=ColorSwatch(t1,pc,function() ns:MarkAuraDirty() end); cs:SetPoint("LEFT",cl,"RIGHT",6,0)
-    -- Manual trigger row (debajo de Duration). Para auras "fully restricted"
-    -- que ningun path de deteccion atrapa.
-    local tsl=t1:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); tsl:SetPoint("TOPLEFT",4,-178); tsl:SetText(ns.L["Trigger spell:"])
-    local tse=EditBox(t1,55); tse:SetPoint("LEFT",tsl,"RIGHT",4,0); tse:SetText("0"); tse:SetNumeric(true)
-    local til=t1:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); til:SetPoint("LEFT",tse,"RIGHT",10,0); til:SetText(ns.L["Trigger item:"])
-    local tie=EditBox(t1,60); tie:SetPoint("LEFT",til,"RIGHT",4,0); tie:SetText("0"); tie:SetNumeric(true)
-    local tHint=InfoHint(t1, ns.L["Workaround for fully-restricted auras: when the trigger spell is cast OR the trigger item is used, the aura is treated as ACTIVE for the manual duration above. Use only when the standard detection paths fail (verify with /hht auradebug)."]); tHint:SetPoint("LEFT",tie,"RIGHT",6,0)
-    -- External trigger key (macro / public API). Mismo mecanismo subyacente que
-    -- el manual trigger spell/item, pero disparado desde /hht trigger <key> o
-    -- HNZHealingTools.Trigger(key). Requiere manualDuration > 0.
-    local tkl=t1:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); tkl:SetPoint("TOPLEFT",4,-204); tkl:SetText(ns.L["Trigger key:"])
-    local tke=EditBox(t1,140); tke:SetPoint("LEFT",tkl,"RIGHT",4,0)
-    local tkHint=InfoHint(t1, ns.L["Optional. Fire this aura from a macro: /hht trigger <key>. Requires Duration > 0. Case-insensitive."]); tkHint:SetPoint("LEFT",tke,"RIGHT",6,0)
+    local ske=EditBox(t1,50); ske:SetText("0"); ske:SetNumeric(true)
+    FieldRow(t1, -154, ns.L["Min stacks:"], ns.L["Used with the 'Below stacks' mode: show the ring while the aura has fewer than this many stacks."], ske)
 
-    local sic=CreateFrame("CheckButton",nil,t1,"UICheckButtonTemplate"); sic:SetSize(18,18); sic:SetPoint("TOPLEFT",2,-234); sic:SetChecked(true); SkinCheck(sic)
-    local sil=t1:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); sil:SetPoint("LEFT",sic,"RIGHT",6,0); sil:SetText(ns.L["Show icon on ring"]); sil:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+    local de=EditBox(t1,50); de:SetText("0"); de:SetNumeric(true)
+    FieldRow(t1, -186, ns.L["Duration (sec, 0=auto):"], ns.L["Some auras (item buffs, restricted effects in Midnight) don't expose their duration via API. If the icon/ring shows but doesn't count down, enter the real duration in seconds here (check Wowhead for the exact value)."], de)
 
-    local spLabel=t1:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); spLabel:SetPoint("TOPLEFT",4,-264); spLabel:SetText(ns.L["Specs:"])
-    local spChk=SpecChecklist(t1); spChk:SetPoint("TOPLEFT",4,-280)
-    local tlLabel=t1:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); tlLabel:SetPoint("TOPLEFT",4,-312); tlLabel:SetText(ns.L["Required talent:"])
-    local tlPick=TalentPicker(t1); tlPick:SetPoint("TOPLEFT",4,-328)
-    local itLabel=t1:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); itLabel:SetPoint("TOPLEFT",4,-360); itLabel:SetText(ns.L["Show only in:"])
-    local itChk=InstanceTypeChecklist(t1); itChk:SetPoint("TOPLEFT",4,-376)
+    -- Manual trigger fields. Para auras "fully restricted" que ningun path atrapa.
+    local tse=EditBox(t1,60); tse:SetText("0"); tse:SetNumeric(true)
+    FieldRow(t1, -218, ns.L["Trigger spell:"], ns.L["Manual trigger: when this spell is cast, the aura is treated as ACTIVE for the Duration above. Use only for fully-restricted auras the normal detection can't see (verify with /hht auradebug)."], tse)
 
-    -- ============ Tab 2: Effects ============
-    local cpCk=CreateFrame("CheckButton",nil,t2,"UICheckButtonTemplate"); cpCk:SetSize(18,18); cpCk:SetPoint("TOPLEFT",2,-4); SkinCheck(cpCk)
-    local cpLabel=t2:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); cpLabel:SetPoint("LEFT",cpCk,"RIGHT",6,0); cpLabel:SetText(ns.L["Pulse icon at screen center on activation"]); cpLabel:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+    local tie=EditBox(t1,60); tie:SetText("0"); tie:SetNumeric(true)
+    FieldRow(t1, -250, ns.L["Trigger item:"], ns.L["Manual trigger: when this item is used, the aura is treated as ACTIVE for the Duration above. Requires Duration > 0."], tie)
 
-    local sndCk=CreateFrame("CheckButton",nil,t2,"UICheckButtonTemplate"); sndCk:SetSize(18,18); sndCk:SetPoint("TOPLEFT",2,-28); SkinCheck(sndCk)
-    local sndLabel=t2:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); sndLabel:SetPoint("LEFT",sndCk,"RIGHT",6,0); sndLabel:SetText(ns.L["Play sound on activation"]); sndLabel:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-    local sndPick=SoundPicker(t2,170); sndPick:SetPoint("LEFT",sndLabel,"RIGHT",10,0)
-    local sndTest=Btn(t2,ns.L["Test"],60,18); sndTest:SetPoint("LEFT",sndPick,"RIGHT",6,0)
-    sndTest:SetScript("OnClick",function() ns.PlayAuraSound(sndPick:GetSoundName()) end)
+    local tke=EditBox(t1,140)
+    FieldRow(t1, -282, ns.L["Trigger key:"], ns.L["Optional. Fire this aura from a macro: /hht trigger <key>. Requires Duration > 0. Case-insensitive."], tke)
 
-    local iconF=CustomIconField(t2); iconF:SetPoint("TOPLEFT",2,-60)
+    -- ============ Tab 2: Display ============
+    local cs=ColorSwatch(t2,pc,function() ns:MarkAuraDirty() end)
+    FieldRow(t2, -8, ns.L["Color:"], ns.L["Color of this aura's segment on the ring."], cs)
+
+    local sic=CreateFrame("CheckButton",nil,t2,"UICheckButtonTemplate"); sic:SetSize(18,18); sic:SetChecked(true); SkinCheck(sic)
+    FieldRow(t2, -40, ns.L["Show icon on ring"], ns.L["Show the aura's icon on its ring segment. Off = a plain colored segment only."], sic)
+
+    local iconF=CustomIconField(t2); iconF:SetPoint("TOPLEFT",2,-76)
+
+    -- ============ Tab 3: Load ============
+    FieldRow(t3, -4, ns.L["Specs:"], ns.L["Limit this aura to the selected specs. None or all checked = every spec."])
+    local spChk=SpecChecklist(t3); spChk:SetPoint("TOPLEFT",4,-20)
+    FieldRow(t3, -52, ns.L["Required talent:"], ns.L["Only show when this talent is selected. Leave empty for no talent requirement."])
+    local tlPick=TalentPicker(t3); tlPick:SetPoint("TOPLEFT",4,-68)
+    FieldRow(t3, -104, ns.L["Show only in:"], ns.L["Limit this aura to the selected instance types. None or all checked = everywhere."])
+    local itChk=InstanceTypeChecklist(t3); itChk:SetPoint("TOPLEFT",4,-120)
+
+    -- ============ Tab 4: Actions ============
+    local cpCk=CreateFrame("CheckButton",nil,t4,"UICheckButtonTemplate"); cpCk:SetSize(18,18); SkinCheck(cpCk)
+    FieldRow(t4, -6, ns.L["Pulse icon at screen center on activation"], ns.L["Briefly flash a large copy of this icon at the center of the screen when the aura becomes active."], cpCk)
+
+    local sndCk=CreateFrame("CheckButton",nil,t4,"UICheckButtonTemplate"); sndCk:SetSize(18,18); SkinCheck(sndCk)
+    FieldRow(t4, -34, ns.L["Play sound on activation"], ns.L["Play a sound when the aura becomes active. Pick the sound below and use Test to preview it."], sndCk)
+    -- Canal (declarado antes del Test para que su OnClick lo capture).
+    local chDD=Dropdown(t4,110,SOUND_CHANNEL_OPTIONS,"Master")
+    FieldRow(t4, -92, ns.L["Channel:"], ns.L["Sound output channel. Master plays even when in-game sound-effect volume is muted."], chDD)
+    -- Picker + Test en su propia fila (control ancho).
+    local sndPick=SoundPicker(t4,170); sndPick:SetPoint("TOPLEFT",4,-60)
+    local sndTest=Btn(t4,ns.L["Test"],60,18); sndTest:SetPoint("LEFT",sndPick,"RIGHT",6,0)
+    sndTest:SetScript("OnClick",function() ns.PlayAuraSound(sndPick:GetSoundName(), chDD:GetValue()) end)
+
+    local loopCk=CreateFrame("CheckButton",nil,t4,"UICheckButtonTemplate"); loopCk:SetSize(18,18); SkinCheck(loopCk)
+    FieldRow(t4, -120, ns.L["Loop sound"], ns.L["Repeat the sound while the aura stays active, at the interval below."], loopCk)
+
+    local liEb=EditBox(t4,50); liEb:SetText("2")
+    FieldRow(t4, -148, ns.L["Loop interval (s):"], ns.L["Seconds between repeats while 'Loop sound' is on."], liEb)
+
+    local expEb=EditBox(t4,50); expEb:SetText("0")
+    FieldRow(t4, -176, ns.L["Alert before expiry (s):"], ns.L["Play the sound this many seconds before the aura expires. 0 = off."], expEb)
 
     local fb=p:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall"); fb:SetPoint("BOTTOMLEFT",4,4); fb:SetPoint("BOTTOMRIGHT",-4,4); fb:SetJustifyH("LEFT")
     local saveBtn=Btn(f,ns.L["Save"],100,26); saveBtn:SetPoint("BOTTOMRIGHT",-110,8)
@@ -2099,6 +2197,10 @@ local function CreateRingAuraEditor()
         e.playSound=sndCk:GetChecked() and true or false
         e.soundName=sndPick:GetSoundName()
         e.soundID=nil
+        e.soundChannel=chDD:GetValue() or "Master"
+        e.loopSound=loopCk:GetChecked() and true or false
+        local _li=tonumber(liEb:GetText()); e.loopInterval=(_li and _li>0) and _li or nil
+        local _ew=tonumber(expEb:GetText()); e.loopExpireWarn=(_ew and _ew>0) and _ew or nil
         e.color={r=pc.r,g=pc.g,b=pc.b,a=pc.a}
         e.specs=spChk:GetSpecs(); e.requiredTalentSpellID=tlPick:GetSpellID()
         e.instanceTypes=itChk:GetTypes()
@@ -2148,6 +2250,7 @@ local function CreateRingAuraEditor()
         swd:SetValue("ACTIVE"); ske:SetText("0"); de:SetText("0"); sic:SetChecked(true)
         tse:SetText("0"); tie:SetText("0"); tke:SetText("")
         cpCk:SetChecked(false); sndCk:SetChecked(false); sndPick:SetSoundName("Default")
+        chDD:SetValue("Master"); loopCk:SetChecked(false); liEb:SetText("2"); expEb:SetText("0")
         spChk:SetSpecs(nil); tlPick:SetSpellID(nil); itChk:SetTypes(nil); fb:SetText("")
         iconF:SetIconID(nil)
         if useNextColor then
@@ -2176,6 +2279,10 @@ local function CreateRingAuraEditor()
         cpCk:SetChecked(entry.cdPulse and true or false)
         sndCk:SetChecked(entry.playSound and true or false)
         sndPick:SetSoundName(entry.soundName or (entry.soundID and tostring(entry.soundID)) or "Default")
+        chDD:SetValue(entry.soundChannel or "Master")
+        loopCk:SetChecked(entry.loopSound and true or false)
+        liEb:SetText(tostring(entry.loopInterval or 2))
+        expEb:SetText(tostring(entry.loopExpireWarn or 0))
         if entry.color then pc.r=entry.color.r; pc.g=entry.color.g; pc.b=entry.color.b; pc.a=entry.color.a; cs:UpdateColor() end
         spChk:SetSpecs(entry.specs); tlPick:SetSpellID(entry.requiredTalentSpellID)
         itChk:SetTypes(entry.instanceTypes)
@@ -2185,14 +2292,6 @@ local function CreateRingAuraEditor()
     end
     return editor
 end
-
-local SOUND_CHANNEL_OPTIONS = {
-    {label="Master",   value="Master"},
-    {label="SFX",      value="SFX"},
-    {label="Music",    value="Music"},
-    {label="Ambience", value="Ambience"},
-    {label="Dialog",   value="Dialog"},
-}
 
 -- Constantes compartidas entre los editors modales y los Pulse rows.
 -- Deben declararse aquí (antes de CreatePulseAuraEditor) para que se resuelvan
@@ -2212,30 +2311,37 @@ local function CreatePulseSpellEditor()
     local p=f.content
     local editingEntry
 
-    -- 2 tabs: General (nombre + instance filter) y Sound (toggle + picker + channel + test).
-    local tabs = CreateModalTabs(p, {ns.L["General"], ns.L["Sound"]})
-    local t1, t2 = tabs[1], tabs[2]
+    -- 4 tabs estilo WeakAuras: Trigger (nombre + trigger key), Display (icono
+    -- custom), Load (instance filter) y Actions (sonido: toggle + picker + canal).
+    local tabs = CreateModalTabs(p, {ns.L["Trigger"], ns.L["Display"], ns.L["Load"], ns.L["Actions"]})
+    local t1, t2, t3, t4 = tabs[1], tabs[2], tabs[3], tabs[4]
 
-    -- ============ Tab 1: General ============
-    local nl=t1:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); nl:SetPoint("TOPLEFT",4,-4); nl:SetText(ns.L["Spell name or ID:"])
-    local eb=EditBox(t1,360); eb:SetPoint("TOPLEFT",4,-22)
+    -- ============ Tab 1: Trigger ============
+    -- Dos columnas: etiqueta + (?) a la izquierda, control a la derecha (FIELD_COL2).
+    local nl=t1:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); nl:SetPoint("TOPLEFT",4,-4); nl:SetText(ns.L["Spell name or ID:"]); nl:SetTextColor(C_TEXT.r,C_TEXT.g,C_TEXT.b)
+    local nHint=InfoHint(t1, ns.L["Type the spell's name or its numeric spell ID. Start typing to autocomplete from your spellbook."]); nHint:SetPoint("LEFT",nl,"RIGHT",4,1)
+    local eb=EditBox(t1,380); eb:SetPoint("TOPLEFT",4,-24)
     AttachSpellAutocomplete(eb)
-    local tkl=t1:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); tkl:SetPoint("TOPLEFT",4,-58); tkl:SetText(ns.L["Trigger key:"])
-    local tke=EditBox(t1,140); tke:SetPoint("LEFT",tkl,"RIGHT",4,0)
-    local tkHint=InfoHint(t1, ns.L["Optional. Fire this pulse from a macro: /hht trigger <key>. Case-insensitive."]); tkHint:SetPoint("LEFT",tke,"RIGHT",6,0)
-    local itLabel=t1:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); itLabel:SetPoint("TOPLEFT",4,-90); itLabel:SetText(ns.L["Show only in:"])
-    local itChk=InstanceTypeChecklist(t1); itChk:SetPoint("TOPLEFT",4,-106)
-    local iconF=CustomIconField(t1); iconF:SetPoint("TOPLEFT",2,-150)
 
-    -- ============ Tab 2: Sound ============
-    local sndCk=CreateFrame("CheckButton",nil,t2,"UICheckButtonTemplate"); sndCk:SetSize(18,18); sndCk:SetPoint("TOPLEFT",2,-4); SkinCheck(sndCk)
-    local sndLabel=t2:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); sndLabel:SetPoint("LEFT",sndCk,"RIGHT",6,0); sndLabel:SetText(ns.L["Play sound on ready"]); sndLabel:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+    local tke=EditBox(t1,140)
+    FieldRow(t1, -60, ns.L["Trigger key:"], ns.L["Optional. Fire this pulse from a macro: /hht trigger <key>. Case-insensitive."], tke)
 
-    local sl=t2:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); sl:SetPoint("TOPLEFT",4,-38); sl:SetText(ns.L["Sound:"])
-    local sndPick=SoundPicker(t2,200); sndPick:SetPoint("TOPLEFT",4,-56)
-    local cl=t2:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); cl:SetPoint("LEFT",sndPick,"RIGHT",16,0); cl:SetText(ns.L["Channel:"])
-    local chDD=Dropdown(t2,110,SOUND_CHANNEL_OPTIONS,"Master"); chDD:SetPoint("LEFT",cl,"RIGHT",6,0)
-    local testBtn=Btn(t2,ns.L["Test"],60,22); testBtn:SetPoint("TOPLEFT",sndPick,"BOTTOMLEFT",0,-8)
+    -- ============ Tab 2: Display ============
+    local iconF=CustomIconField(t2); iconF:SetPoint("TOPLEFT",2,-8)
+
+    -- ============ Tab 3: Load ============
+    FieldRow(t3, -4, ns.L["Show only in:"], ns.L["Limit this pulse to the selected instance types. None or all checked = everywhere."])
+    local itChk=InstanceTypeChecklist(t3); itChk:SetPoint("TOPLEFT",4,-20)
+
+    -- ============ Tab 4: Actions ============
+    local sndCk=CreateFrame("CheckButton",nil,t4,"UICheckButtonTemplate"); sndCk:SetSize(18,18); SkinCheck(sndCk)
+    FieldRow(t4, -6, ns.L["Play sound on ready"], ns.L["Play a sound when the spell comes off cooldown. Pick the sound below and use Test to preview it."], sndCk)
+    -- Canal (declarado antes del Test para que su OnClick lo capture).
+    local chDD=Dropdown(t4,110,SOUND_CHANNEL_OPTIONS,"Master")
+    FieldRow(t4, -68, ns.L["Channel:"], ns.L["Sound output channel. Master plays even when in-game sound-effect volume is muted."], chDD)
+    -- Picker + Test en su propia fila (control ancho).
+    local sndPick=SoundPicker(t4,200); sndPick:SetPoint("TOPLEFT",4,-38)
+    local testBtn=Btn(t4,ns.L["Test"],60,22); testBtn:SetPoint("LEFT",sndPick,"RIGHT",8,0)
     testBtn:SetScript("OnClick",function()
         local sid = ns.GetResolvedSpellID(eb)
         local nm, ic = ns.GetSpellDisplayInfo(sid)
@@ -2310,37 +2416,43 @@ local function CreatePulseAuraEditor()
     local p=f.content
     local editingEntry
 
-    -- 2 tabs: General (nombre + unit/filter + instance filter) y Sound.
-    local tabs = CreateModalTabs(p, {ns.L["General"], ns.L["Sound"]})
-    local t1, t2 = tabs[1], tabs[2]
+    -- 4 tabs estilo WeakAuras: Trigger (nombre + unit/filter + trigger key),
+    -- Display (icono custom), Load (instance filter) y Actions (sonido).
+    local tabs = CreateModalTabs(p, {ns.L["Trigger"], ns.L["Display"], ns.L["Load"], ns.L["Actions"]})
+    local t1, t2, t3, t4 = tabs[1], tabs[2], tabs[3], tabs[4]
 
-    -- ============ Tab 1: General ============
-    local nl=t1:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); nl:SetPoint("TOPLEFT",4,-4); nl:SetText(ns.L["Spell name or ID:"])
-    local eb=EditBox(t1,360); eb:SetPoint("TOPLEFT",4,-22)
+    -- ============ Tab 1: Trigger ============
+    -- Dos columnas: etiqueta + (?) a la izquierda, control a la derecha (FIELD_COL2).
+    local nl=t1:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); nl:SetPoint("TOPLEFT",4,-4); nl:SetText(ns.L["Spell name or ID:"]); nl:SetTextColor(C_TEXT.r,C_TEXT.g,C_TEXT.b)
+    local nHint=InfoHint(t1, ns.L["Type the aura's name or its numeric spell ID. Start typing to autocomplete from your spellbook."]); nHint:SetPoint("LEFT",nl,"RIGHT",4,1)
+    local eb=EditBox(t1,380); eb:SetPoint("TOPLEFT",4,-24)
     AttachSpellAutocomplete(eb)
 
-    local ul=t1:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); ul:SetPoint("TOPLEFT",4,-58); ul:SetText(ns.L["Unit:"])
-    local udd=Dropdown(t1,90,PULSE_UNITS,"player"); udd:SetPoint("LEFT",ul,"RIGHT",6,0)
-    local fl=t1:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); fl:SetPoint("LEFT",udd,"RIGHT",16,0); fl:SetText(ns.L["Filter:"])
-    local fdd=Dropdown(t1,90,PULSE_FILTERS,"HELPFUL"); fdd:SetPoint("LEFT",fl,"RIGHT",6,0)
+    local udd=Dropdown(t1,140,PULSE_UNITS,"player")
+    FieldRow(t1, -60, ns.L["Unit:"], ns.L["Which unit to watch for this aura: target, player, focus, mouseover or pet."], udd)
 
-    local tkl=t1:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); tkl:SetPoint("TOPLEFT",4,-94); tkl:SetText(ns.L["Trigger key:"])
-    local tke=EditBox(t1,140); tke:SetPoint("LEFT",tkl,"RIGHT",4,0)
-    local tkHint=InfoHint(t1, ns.L["Optional. Fire this pulse from a macro: /hht trigger <key>. Case-insensitive."]); tkHint:SetPoint("LEFT",tke,"RIGHT",6,0)
+    local fdd=Dropdown(t1,140,PULSE_FILTERS,"HELPFUL")
+    FieldRow(t1, -92, ns.L["Filter:"], ns.L["Whether to track a Buff (HELPFUL) or a Debuff (HARMFUL). Must match the aura's real type or it won't be found."], fdd)
 
-    local itLabel=t1:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); itLabel:SetPoint("TOPLEFT",4,-126); itLabel:SetText(ns.L["Show only in:"])
-    local itChk=InstanceTypeChecklist(t1); itChk:SetPoint("TOPLEFT",4,-142)
-    local iconF=CustomIconField(t1); iconF:SetPoint("TOPLEFT",2,-186)
+    local tke=EditBox(t1,140)
+    FieldRow(t1, -124, ns.L["Trigger key:"], ns.L["Optional. Fire this pulse from a macro: /hht trigger <key>. Case-insensitive."], tke)
 
-    -- ============ Tab 2: Sound ============
-    local sndCk=CreateFrame("CheckButton",nil,t2,"UICheckButtonTemplate"); sndCk:SetSize(18,18); sndCk:SetPoint("TOPLEFT",2,-4); SkinCheck(sndCk)
-    local sndLabel=t2:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); sndLabel:SetPoint("LEFT",sndCk,"RIGHT",6,0); sndLabel:SetText(ns.L["Play sound on gain"]); sndLabel:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+    -- ============ Tab 2: Display ============
+    local iconF=CustomIconField(t2); iconF:SetPoint("TOPLEFT",2,-8)
 
-    local sl=t2:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); sl:SetPoint("TOPLEFT",4,-38); sl:SetText(ns.L["Sound:"])
-    local sndPick=SoundPicker(t2,200); sndPick:SetPoint("TOPLEFT",4,-56)
-    local cl=t2:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); cl:SetPoint("LEFT",sndPick,"RIGHT",16,0); cl:SetText(ns.L["Channel:"])
-    local chDD=Dropdown(t2,110,SOUND_CHANNEL_OPTIONS,"Master"); chDD:SetPoint("LEFT",cl,"RIGHT",6,0)
-    local testBtn=Btn(t2,ns.L["Test"],60,22); testBtn:SetPoint("TOPLEFT",sndPick,"BOTTOMLEFT",0,-8)
+    -- ============ Tab 3: Load ============
+    FieldRow(t3, -4, ns.L["Show only in:"], ns.L["Limit this pulse to the selected instance types. None or all checked = everywhere."])
+    local itChk=InstanceTypeChecklist(t3); itChk:SetPoint("TOPLEFT",4,-20)
+
+    -- ============ Tab 4: Actions ============
+    local sndCk=CreateFrame("CheckButton",nil,t4,"UICheckButtonTemplate"); sndCk:SetSize(18,18); SkinCheck(sndCk)
+    FieldRow(t4, -6, ns.L["Play sound on gain"], ns.L["Play a sound when the aura is gained. Pick the sound below and use Test to preview it."], sndCk)
+    -- Canal (declarado antes del Test para que su OnClick lo capture).
+    local chDD=Dropdown(t4,110,SOUND_CHANNEL_OPTIONS,"Master")
+    FieldRow(t4, -68, ns.L["Channel:"], ns.L["Sound output channel. Master plays even when in-game sound-effect volume is muted."], chDD)
+    -- Picker + Test en su propia fila (control ancho).
+    local sndPick=SoundPicker(t4,200); sndPick:SetPoint("TOPLEFT",4,-38)
+    local testBtn=Btn(t4,ns.L["Test"],60,22); testBtn:SetPoint("LEFT",sndPick,"RIGHT",8,0)
     testBtn:SetScript("OnClick",function()
         local sid = ns.GetResolvedSpellID(eb)
         local nm, ic = ns.GetSpellDisplayInfo(sid)
@@ -2459,16 +2571,21 @@ local function CreateCursorItemEditor()
     local f=CreateEditorFrame("HNZHealingToolsItemcursorEditor", ns.L["Cursor Item"], 500, 500)
     local p=f.content
     local editingEntry
+    -- Context: lista destino + refresh (default = cursorSpells, donde viven los
+    -- items junto a las spells). Los Fixed Panels apuntan a panel.spells.
+    local ctxList, ctxRefresh
+    local function CtxRefresh() if ctxRefresh then ctxRefresh() elseif ns.RefreshSpellList then ns.RefreshSpellList() end end
+    local function SetCtx(list, refresh) ctxList = list; ctxRefresh = refresh end
 
     local tabs = CreateModalTabs(p, {ns.L["General"], ns.L["Display"], ns.L["Effects"]})
     local t1, t2, t3 = tabs[1], tabs[2], tabs[3]
 
     local draft = {iconSize=0, opacity=0, offsetX=0, offsetY=0}
     local sliders = {}
-    local function MakeSlider(parent, label, mn, mx, step, key)
+    local function MakeSlider(parent, label, mn, mx, step, key, tooltip)
         local s = CreateSlider(parent, label, mn, mx, step,
             function() return draft[key] end,
-            function(v) draft[key] = v end)
+            function(v) draft[key] = v end, tooltip)
         table.insert(sliders, s)
         return s
     end
@@ -2553,23 +2670,24 @@ local function CreateCursorItemEditor()
     end
 
     saveBtn:SetScript("OnClick",function()
+        local list = ctxList or ns.db.cursorSpells
         if editingEntry then
             local id = ns.GetItemIDFromInput(eb:GetText())
             if id and id ~= editingEntry.itemID then editingEntry.itemID = id end
             ApplyToEntry(editingEntry); ns:MarkSpellDirty()
-            f:Hide(); if ns.RefreshSpellList then ns.RefreshSpellList() end
+            f:Hide(); CtxRefresh()
             return
         end
         local input=(eb:GetText() or ""):trim()
         if input=="" then fb:SetTextColor(1,0.3,0.3); fb:SetText(ns.L["Enter an item ID, name, or link."]); return end
-        local ok, msg = ns:AddCursorItem(input)
+        local ok, msg = ns:AddCursorItem(input, list)
         if ok then
             local id = ns.GetItemIDFromInput(input)
             if id and ns._FindItemEntry then
-                local _, added = ns._FindItemEntry(ns.db.cursorSpells, id)
+                local _, added = ns._FindItemEntry(list, id)
                 if added then ApplyToEntry(added) end
             end
-            f:Hide(); if ns.RefreshSpellList then ns.RefreshSpellList() end
+            f:Hide(); CtxRefresh()
         else
             fb:SetTextColor(1,0.3,0.3); fb:SetText(msg)
         end
@@ -2589,14 +2707,17 @@ local function CreateCursorItemEditor()
     end
 
     local editor={}
-    function editor:OpenAdd()
+    function editor:OpenAdd(list, refresh)
+        SetCtx(list, refresh)
         Reset(); f.title:SetText("|cff00ccff"..ns.L["Cursor Item"].."|r"); saveBtn:SetText(ns.L["Add"]); f:Show(); eb:SetFocus()
     end
-    function editor:OpenWithItemID(id)
+    function editor:OpenWithItemID(id, list, refresh)
+        SetCtx(list, refresh)
         Reset(); eb:SetText(tostring(id)); RefreshPreview()
         f.title:SetText("|cff00ccff"..ns.L["Cursor Item"].."|r"); saveBtn:SetText(ns.L["Add"]); f:Show()
     end
-    function editor:OpenEdit(entry)
+    function editor:OpenEdit(entry, list, refresh)
+        SetCtx(list, refresh)
         Reset(); editingEntry=entry
         eb:SetText(tostring(entry.itemID or ""))
         RefreshPreview()
@@ -3439,6 +3560,523 @@ local function BuildCursorSettingsPage(p)
 
 end
 
+-- ==================== Fixed Panels ====================
+-- Paneles fijos: misma logica del cursor pero anclados a puntos fijos de pantalla,
+-- agrupados en paneles con nombre. Cada panel tiene sus propias listas
+-- panel.spells/panel.auras. Reusamos los editores modales del cursor pasandoles la
+-- lista del panel como contexto (ver SetCtx en los editores). Render/posicion en
+-- FixedPanels.lua. Ver [[project_editor_tabs_weakauras]] para los tabs de editor.
+-- Todo el bloque va en un `do...end` para exponer solo BuildFixedPanelsPage como
+-- local de nivel superior (el resto de helpers se liberan al cerrar el bloque —
+-- mantiene baja la cuenta de locals del chunk principal en este archivo enorme).
+local BuildFixedPanelsPage
+do
+local fixedPanelsListC      -- scroll container con la lista de paneles
+local fixedPanelEditor      -- modal lazy del editor de panel
+local RefreshFixedPanelsList
+local GetFixedPanelEditor
+
+local function FP_panels()
+    ns.db.fixedPanels = ns.db.fixedPanels or { enabled=false, panels={} }
+    ns.db.fixedPanels.panels = ns.db.fixedPanels.panels or {}
+    return ns.db.fixedPanels.panels
+end
+
+local function FixedPanelRow(parent, panel, idx)
+    local row = CreateFrame("Frame", nil, parent, "BackdropTemplate")
+    row:SetHeight(32); SubPanelBackdrop(row, 0.6)
+
+    -- Enable toggle del panel (independiente del master toggle de la feature).
+    local toggle = CreateFrame("CheckButton", nil, row, "UICheckButtonTemplate")
+    toggle:SetSize(20, 20); toggle:SetPoint("LEFT", 6, 0); SkinCheck(toggle)
+    toggle:SetChecked(panel.enabled ~= false)
+    toggle:SetScript("OnClick", function(self)
+        panel.enabled = self:GetChecked() and true or false
+        if ns.RebuildFixedPanels then ns.RebuildFixedPanels() end
+    end)
+
+    local fs = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    fs:SetPoint("LEFT", toggle, "RIGHT", 8, 0); fs:SetWidth(230); fs:SetJustifyH("LEFT"); fs:SetWordWrap(false)
+    local ns_ = #(panel.spells or {}); local na_ = #(panel.auras or {})
+    fs:SetText(("%s  |cff888888(%d+%d)|r"):format(panel.name or "Panel", ns_, na_))
+    if panel.enabled == false then fs:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b) end
+
+    -- Borrar (X) al extremo derecho.
+    local delBtn = CreateFrame("Button", nil, row); delBtn:SetSize(20, 20); delBtn:SetPoint("RIGHT", -8, 0)
+    local dt = delBtn:CreateFontString(nil, "OVERLAY", "GameFontRed"); dt:SetAllPoints(); dt:SetText("X")
+    local dh = delBtn:CreateTexture(nil, "HIGHLIGHT"); dh:SetAllPoints(); dh:SetColorTexture(0.8, 0.2, 0.2, 0.3)
+    delBtn:SetScript("OnClick", function()
+        table.remove(FP_panels(), idx)
+        if ns.RebuildFixedPanels then ns.RebuildFixedPanels() end
+        RefreshFixedPanelsList()
+    end)
+
+    local editBtn = Btn(row, ns.L["Edit"], 60, 20); editBtn:SetPoint("RIGHT", delBtn, "LEFT", -6, 0)
+    editBtn:SetScript("OnClick", function() GetFixedPanelEditor():Open(panel) end)
+
+    -- Move/Lock: togglea el mover de ESTE panel (drag para reubicar en pantalla).
+    local moveBtn = Btn(row, ns.L["Move"], 60, 20); moveBtn:SetPoint("RIGHT", editBtn, "LEFT", -6, 0)
+    local function syncMove()
+        local unlocked = ns.FixedPanelIsUnlocked and ns.FixedPanelIsUnlocked(panel)
+        moveBtn:SetText(unlocked and ns.L["Lock"] or ns.L["Move"])
+    end
+    syncMove()
+    moveBtn:SetScript("OnClick", function()
+        if ns.FixedPanelToggleMover then ns.FixedPanelToggleMover(panel) end
+        syncMove()
+    end)
+
+    return row
+end
+
+RefreshFixedPanelsList = function()
+    if not fixedPanelsListC then return end
+    ClearListContainer(fixedPanelsListC)
+    local panels = FP_panels()
+    if #panels == 0 then
+        local e = fixedPanelsListC:CreateFontString(nil, "OVERLAY", "GameFontDisable")
+        e:SetPoint("TOPLEFT", 5, -8); e:SetText(ns.L["No panels. Use 'Add Panel' below."])
+        fixedPanelsListC:SetHeight(30)
+        return
+    end
+    local rh = 36
+    for i, panel in ipairs(panels) do
+        local row = FixedPanelRow(fixedPanelsListC, panel, i)
+        row:SetPoint("TOPLEFT", 3, -3 - (i-1)*rh)
+        row:SetPoint("TOPRIGHT", -3, -3 - (i-1)*rh)
+    end
+    fixedPanelsListC:SetHeight(#panels * rh + 6)
+end
+
+-- Modal editor de UN panel: tabs Config (nombre/posicion/grid) + Spells + Auras.
+-- Las sub-listas reusan los editores del cursor con la lista del panel como ctx.
+local function CreateFixedPanelEditor()
+    local f = CreateEditorFrame("HNZHealingToolsFixedPanelEditor", ns.L["Fixed Panel"], 560, 540)
+    local p = f.content
+    local panel               -- panel en edicion (set en Open)
+
+    local tabs = CreateModalTabs(p, {ns.L["Config"], ns.L["Spells"], ns.L["Auras"]})
+    local tSet, tSpells, tAuras = tabs[1], tabs[2], tabs[3]
+
+    -- ----- Tab Config -----
+    local refreshables = {}   -- widgets con :Refresh() para repintar en Open
+    local moveBtn             -- declarado aca para que LoadConfig sincronice su label
+
+    local y = -6
+    local nameLbl = tSet:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    nameLbl:SetPoint("TOPLEFT", 0, y); nameLbl:SetText(ns.L["Panel name"])
+    local nameEb = EditBox(tSet, 220); nameEb:SetPoint("LEFT", nameLbl, "RIGHT", 8, 0)
+    nameEb:SetScript("OnTextChanged", function(self)
+        if panel then panel.name = self:GetText(); RefreshFixedPanelsList() end
+    end)
+    y = y - 30
+
+    local visLbl = tSet:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    visLbl:SetPoint("TOPLEFT", 0, y); visLbl:SetText(ns.L["Show:"] or ns.L["Visibility"] or "Show:")
+    local visDD = VisibilityDropdown(tSet,
+        function() return panel and panel.visibility end,
+        function(v) if panel then panel.visibility = v; if ns.RebuildFixedPanels then ns.RebuildFixedPanels() end end end)
+    visDD:SetPoint("LEFT", visLbl, "RIGHT", 4, 0)
+    refreshables[#refreshables+1] = { Refresh = function() if panel then visDD:SetValue(panel.visibility or "always") end end }
+
+    moveBtn = Btn(tSet, ns.L["Move"], 80, 22); moveBtn:SetPoint("LEFT", visDD, "RIGHT", 12, 0)
+    local function SyncMoveBtn()
+        local unlocked = panel and ns.FixedPanelIsUnlocked and ns.FixedPanelIsUnlocked(panel)
+        moveBtn:SetText(unlocked and ns.L["Lock"] or ns.L["Move"])
+    end
+    moveBtn:SetScript("OnClick", function()
+        if panel and ns.FixedPanelToggleMover then ns.FixedPanelToggleMover(panel) end
+        SyncMoveBtn()
+    end)
+    refreshables[#refreshables+1] = { Refresh = SyncMoveBtn }
+    y = y - 34
+
+    local C1, C2 = 0, 280
+    local sh1 = SubH(tSet, ns.L["Size & Layout"]); sh1:SetPoint("TOPLEFT", C1, y)
+    local sh2 = SubH(tSet, ns.L["Position"]); sh2:SetPoint("TOPLEFT", C2, y)
+    local cy = y - 20
+
+    -- columna izquierda: grid; columna derecha: posicion. getValue/setValue cierran
+    -- sobre el upvalue `panel` (seteado antes de mostrar el modal).
+    local function S(parent, label, mn, mx, st, key, onSet)
+        local s = CreateSlider(parent, label, mn, mx, st,
+            function() return panel and panel[key] or mn end,
+            function(v) if panel then panel[key] = v; if onSet then onSet() end end end)
+        refreshables[#refreshables+1] = s
+        return s
+    end
+    local function markDirty() if ns.MarkSpellDirty then ns:MarkSpellDirty() end; if ns.MarkAuraDirty then ns:MarkAuraDirty() end end
+    local function refreshPos() if panel and ns.FixedPanelRefreshPos then ns.FixedPanelRefreshPos(panel) end end
+
+    local leftDefs = {
+        { ns.L["Icon Size"],    16, 80, 2, "iconSize",    markDirty },
+        { ns.L["Icon Spacing"],  0, 20, 1, "iconSpacing", markDirty },
+        { ns.L["Max Columns"],   1, 16, 1, "maxColumns",  markDirty },
+        { ns.L["Font Size"],     6, 30, 1, "fontSize",    markDirty },
+        { ns.L["Opacity"],     0.1,  1, 0.05, "opacity",  markDirty },
+    }
+    local ly = cy
+    for _, d in ipairs(leftDefs) do
+        local s = S(tSet, d[1], d[2], d[3], d[4], d[5], d[6]); s:SetPoint("TOPLEFT", C1, ly); ly = ly - 46
+    end
+    local rightDefs = {
+        { ns.L["Offset X"], -800, 800, 5, "x", refreshPos },
+        { ns.L["Offset Y"], -800, 800, 5, "y", refreshPos },
+    }
+    local ry = cy
+    for _, d in ipairs(rightDefs) do
+        local s = S(tSet, d[1], d[2], d[3], d[4], d[5], d[6]); s:SetPoint("TOPLEFT", C2, ry); ry = ry - 46
+    end
+    local posHint = tSet:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    posHint:SetPoint("TOPLEFT", C2, ry - 2); posHint:SetWidth(250); posHint:SetJustifyH("LEFT")
+    posHint:SetText(ns.L["Tip: use Move to drag the panel on screen."])
+
+    -- ----- Tab Spells -----
+    local panelSpellsC
+    local function RefreshPanelSpells()
+        if not panelSpellsC or not panel then return end
+        ClearListContainer(panelSpellsC)
+        local list = panel.spells or {}
+        if #list == 0 then
+            local e = panelSpellsC:CreateFontString(nil, "OVERLAY", "GameFontDisable")
+            e:SetPoint("TOPLEFT", 5, -8); e:SetText(ns.L["No spells. Use 'Add Cursor Spell...' below."])
+            panelSpellsC:SetHeight(30); RefreshFixedPanelsList(); return
+        end
+        local n = #list
+        for i, entry in ipairs(list) do
+            local row = SpellRow(panelSpellsC, entry, i, n,
+                function(targetEntry)
+                    if ns.RemoveEntryByKey then ns.RemoveEntryByKey(list, ns.GetEntryKey(targetEntry))
+                    else ns.RemoveSpellEntry(list, targetEntry.spellID) end
+                    if ns.RebuildFixedPanels then ns.RebuildFixedPanels() end
+                    RefreshPanelSpells()
+                end,
+                function(e)
+                    if e.itemID and e.itemID > 0 then GetCursorItemEditor():OpenEdit(e, list, RefreshPanelSpells)
+                    else GetCursorSpellEditor():OpenEdit(e, list, RefreshPanelSpells) end
+                end,
+                function() SwapListEntries(list, i, i-1); RefreshPanelSpells() end,
+                function() SwapListEntries(list, i, i+1); RefreshPanelSpells() end)
+            row:SetPoint("TOPLEFT", 3, -3 - (i-1)*38)
+        end
+        panelSpellsC:SetHeight(n*38 + 6)
+        RefreshFixedPanelsList()
+    end
+    do
+        local hd = H(tSpells, ns.L["Spells"]); hd:SetPoint("TOPLEFT", 0, -4)
+        panelSpellsC = ScrollList(tSpells, -28, 360)
+        local addBtn = Btn(tSpells, ns.L["Add Cursor Spell..."], 150, 24); addBtn:SetPoint("TOPLEFT", 0, -396)
+        addBtn:SetScript("OnClick", function() if panel then GetCursorSpellEditor():OpenAdd(panel.spells, RefreshPanelSpells) end end)
+        local addItem = Btn(tSpells, ns.L["Add Item..."], 100, 24); addItem:SetPoint("LEFT", addBtn, "RIGHT", 6, 0)
+        addItem:SetScript("OnClick", function() if panel then GetCursorItemEditor():OpenAdd(panel.spells, RefreshPanelSpells) end end)
+        local dz = DropZone(tSpells, 160, 24,
+            function(id) if panel then GetCursorSpellEditor():OpenWithSpellID(id, panel.spells, RefreshPanelSpells) end end,
+            function(itemID) if panel then GetCursorItemEditor():OpenWithItemID(itemID, panel.spells, RefreshPanelSpells) end end)
+        dz:SetPoint("LEFT", addItem, "RIGHT", 8, 0)
+    end
+
+    -- ----- Tab Auras -----
+    local panelAurasC
+    local function RefreshPanelAuras()
+        if not panelAurasC or not panel then return end
+        ClearListContainer(panelAurasC)
+        local list = panel.auras or {}
+        if #list == 0 then
+            local e = panelAurasC:CreateFontString(nil, "OVERLAY", "GameFontDisable")
+            e:SetPoint("TOPLEFT", 5, -8); e:SetText(ns.L["No auras. Use 'Add Cursor Aura...' below."])
+            panelAurasC:SetHeight(30); RefreshFixedPanelsList(); return
+        end
+        local n = #list
+        for i, entry in ipairs(list) do
+            local row = CursorAuraRow(panelAurasC, entry, i, n,
+                function(id) ns.RemoveSpellEntry(list, id); if ns.RebuildFixedPanels then ns.RebuildFixedPanels() end; RefreshPanelAuras() end,
+                function(e) GetCursorAuraEditor():OpenEdit(e, list, RefreshPanelAuras) end,
+                function() SwapListEntries(list, i, i-1); RefreshPanelAuras() end,
+                function() SwapListEntries(list, i, i+1); RefreshPanelAuras() end)
+            row:SetPoint("TOPLEFT", 3, -3 - (i-1)*38)
+        end
+        panelAurasC:SetHeight(n*38 + 6)
+        RefreshFixedPanelsList()
+    end
+    do
+        local hd = H(tAuras, ns.L["Auras"]); hd:SetPoint("TOPLEFT", 0, -4)
+        panelAurasC = ScrollList(tAuras, -28, 360)
+        local addBtn = Btn(tAuras, ns.L["Add Cursor Aura..."], 150, 24); addBtn:SetPoint("TOPLEFT", 0, -396)
+        addBtn:SetScript("OnClick", function() if panel then GetCursorAuraEditor():OpenAdd(panel.auras, RefreshPanelAuras) end end)
+        local dz = DropZone(tAuras, 200, 24,
+            function(id) if panel then GetCursorAuraEditor():OpenWithSpellID(id, panel.auras, RefreshPanelAuras) end end)
+        dz:SetPoint("LEFT", addBtn, "RIGHT", 8, 0)
+    end
+
+    local editor = {}
+    function editor:Open(pnl)
+        panel = pnl
+        nameEb:SetText(pnl.name or "")
+        for _, w in ipairs(refreshables) do if w.Refresh then w:Refresh() end end
+        RefreshPanelSpells(); RefreshPanelAuras()
+        f.title:SetText("|cff00ccff"..(pnl.name or ns.L["Fixed Panel"]).."|r")
+        f:Show()
+    end
+    return editor
+end
+
+GetFixedPanelEditor = function()
+    if not fixedPanelEditor then fixedPanelEditor = CreateFixedPanelEditor() end
+    return fixedPanelEditor
+end
+
+function BuildFixedPanelsPage(p)
+    local y = -8
+    local hd = H(p, ns.L["Fixed Panels"]); hd:SetPoint("TOPLEFT", 8, y); y = y - 18
+    local ht = p:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    ht:SetPoint("TOPLEFT", 8, y); ht:SetWidth(560); ht:SetJustifyH("LEFT")
+    ht:SetText(ns.L["Icons anchored to fixed screen spots, grouped in named panels. Same tracking as the cursor, but they don't follow the mouse."])
+    y = y - 30
+
+    fixedPanelsListC = ScrollList(p, y, 360); y = y - 368
+
+    local addBtn = Btn(p, ns.L["Add Panel"], 150, 26); addBtn:SetPoint("TOPLEFT", 8, y)
+    addBtn:SetScript("OnClick", function()
+        local panels = FP_panels()
+        table.insert(panels, {
+            name = (ns.L["Panel"] or "Panel").." "..(#panels + 1),
+            x = 0, y = 0,
+            iconSize = 36, iconSpacing = 4, maxColumns = 8, fontSize = 12, opacity = 1,
+            visibility = "always",
+            spells = {}, auras = {},
+        })
+        if ns.RebuildFixedPanels then ns.RebuildFixedPanels() end
+        RefreshFixedPanelsList()
+        GetFixedPanelEditor():Open(panels[#panels])
+    end)
+
+    RefreshFixedPanelsList()
+end
+end  -- do (Fixed Panels)
+
+-- ==================== CDM Enhancer ====================
+-- Reglas por hechizo que aplican efectos (glow/pulse/sonido/recolor/desaturar/
+-- countdown) sobre los iconos del Cooldown Manager nativo de Blizzard cuando el
+-- hechizo entra en un estado (por expirar / listo / bajo en stacks). Lo dibuja y
+-- evalua CdmEnhancer.lua; aca solo la UI. Todo en un do...end (solo se expone el
+-- builder al chunk principal).
+local BuildCdmEnhancerPage
+do
+local cdmRulesC
+local cdmRuleEditor
+local RefreshCdmRulesList
+local GetCdmRuleEditor
+
+local function CDM_rules()
+    ns.db.cdmEnhancer = ns.db.cdmEnhancer or { enabled=false, rules={} }
+    ns.db.cdmEnhancer.rules = ns.db.cdmEnhancer.rules or {}
+    return ns.db.cdmEnhancer.rules
+end
+
+RefreshCdmRulesList = function()
+    if not cdmRulesC then return end
+    ClearListContainer(cdmRulesC)
+    local list = CDM_rules()
+    if #list == 0 then
+        local e = cdmRulesC:CreateFontString(nil, "OVERLAY", "GameFontDisable")
+        e:SetPoint("TOPLEFT", 5, -8); e:SetText(ns.L["No rules. Use 'Add Rule' below."])
+        cdmRulesC:SetHeight(30); return
+    end
+    local n = #list
+    for i, rule in ipairs(list) do
+        local row = SpellRow(cdmRulesC, rule, i, n,
+            function(target)
+                for idx, r in ipairs(list) do if r == target then table.remove(list, idx); break end end
+                if ns.RebuildCdmRules then ns.RebuildCdmRules() end
+                RefreshCdmRulesList()
+            end,
+            function(e) GetCdmRuleEditor():OpenEdit(e) end,
+            function() SwapListEntries(list, i, i-1); RefreshCdmRulesList() end,
+            function() SwapListEntries(list, i, i+1); RefreshCdmRulesList() end)
+        row:SetPoint("TOPLEFT", 3, -3 - (i-1)*38)
+    end
+    cdmRulesC:SetHeight(n*38 + 6)
+end
+
+local function CreateCdmRuleEditor()
+    local f = CreateEditorFrame("HNZHealingToolsCdmRuleEditor", ns.L["CDM Rule"], 520, 540)
+    local p = f.content
+    local editing                 -- regla en edicion (nil = add)
+    local refreshables = {}
+    local draft = { expireWarn = 5, minStacks = 2, pulseScale = 1.4, soundInterval = 2 }
+    local glowColor = { r = 1, g = 0.9, b = 0.3 }
+    local recolorColor = { r = 1, g = 0.2, b = 0.2 }
+
+    local tabs = CreateModalTabs(p, { ns.L["Trigger"], ns.L["Effects"] })
+    local t1, t2 = tabs[1], tabs[2]
+
+    local function Slider(parent, label, mn, mx, st, key)
+        local s = CreateSlider(parent, label, mn, mx, st,
+            function() return draft[key] end,
+            function(v) draft[key] = v end)
+        refreshables[#refreshables+1] = s
+        return s
+    end
+    local function Check(parent, label)
+        local ck = CreateFrame("CheckButton", nil, parent, "UICheckButtonTemplate")
+        ck:SetSize(22, 22); SkinCheck(ck)
+        ck.text = ck:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        ck.text:SetPoint("LEFT", ck, "RIGHT", 4, 0); ck.text:SetText(label)
+        ck.text:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+        return ck
+    end
+
+    -- ----- Tab Trigger -----
+    local y = -6
+    local spLbl = t1:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    spLbl:SetPoint("TOPLEFT", 0, y); spLbl:SetText(ns.L["Spell:"] or "Spell:")
+    local spEb = EditBox(t1, 180); spEb:SetPoint("LEFT", spLbl, "RIGHT", 8, 0)
+    local dz = DropZone(t1, 150, 22, function(id) spEb:SetText(tostring(id)) end)
+    dz:SetPoint("LEFT", spEb, "RIGHT", 8, 0)
+    y = y - 32
+
+    local expCk = Check(t1, ns.L["When about to expire"]); expCk:SetPoint("TOPLEFT", 0, y); y = y - 24
+    local expSl = Slider(t1, ns.L["Alert seconds before expiry"], 1, 30, 1, "expireWarn"); expSl:SetPoint("TOPLEFT", 16, y); y = y - 48
+    local rdyCk = Check(t1, ns.L["When ready (off cooldown)"]); rdyCk:SetPoint("TOPLEFT", 0, y); y = y - 28
+    local lsCk = Check(t1, ns.L["When below stacks / missing"]); lsCk:SetPoint("TOPLEFT", 0, y); y = y - 24
+    local lsSl = Slider(t1, ns.L["Min stacks"] or "Min stacks", 1, 10, 1, "minStacks"); lsSl:SetPoint("TOPLEFT", 16, y); y = y - 48
+
+    -- ----- Tab Effects -----
+    local ey = -6
+    local glowCk = Check(t2, ns.L["Glow"]); glowCk:SetPoint("TOPLEFT", 0, ey)
+    local glowSw = ColorSwatch(t2, glowColor); glowSw:SetPoint("LEFT", glowCk.text, "RIGHT", 10, 0)
+    ey = ey - 30
+    local pulseCk = Check(t2, ns.L["Grow / pulse"]); pulseCk:SetPoint("TOPLEFT", 0, ey); ey = ey - 22
+    local pulseSl = Slider(t2, ns.L["Pulse scale"], 1.1, 2.0, 0.1, "pulseScale"); pulseSl:SetPoint("TOPLEFT", 16, ey); ey = ey - 48
+    local recolorCk = Check(t2, ns.L["Recolor border"]); recolorCk:SetPoint("TOPLEFT", 0, ey)
+    local recolorSw = ColorSwatch(t2, recolorColor); recolorSw:SetPoint("LEFT", recolorCk.text, "RIGHT", 10, 0)
+    ey = ey - 30
+    local desatCk = Check(t2, ns.L["Desaturate icon"]); desatCk:SetPoint("TOPLEFT", 0, ey); ey = ey - 28
+    local cdCk = Check(t2, ns.L["Show countdown"]); cdCk:SetPoint("TOPLEFT", 0, ey); ey = ey - 30
+
+    local sndCk = Check(t2, ns.L["Sound"]); sndCk:SetPoint("TOPLEFT", 0, ey); ey = ey - 26
+    local sndPick = SoundPicker(t2, 170); sndPick:SetPoint("TOPLEFT", 16, ey)
+    local chDD = Dropdown(t2, 110, SOUND_CHANNEL_OPTIONS, "Master"); chDD:SetPoint("LEFT", sndPick, "RIGHT", 8, 0)
+    ey = ey - 30
+    local loopCk = Check(t2, ns.L["Loop sound"]); loopCk:SetPoint("TOPLEFT", 16, ey)
+    local liEb = EditBox(t2, 50); liEb:SetPoint("LEFT", loopCk.text, "RIGHT", 8, 0)
+    local liLbl = t2:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    liLbl:SetPoint("LEFT", liEb, "RIGHT", 4, 0); liLbl:SetText(ns.L["Loop interval (s):"])
+
+    local fb = f:CreateFontString(nil, "OVERLAY", "GameFontRed"); fb:SetPoint("BOTTOMLEFT", 12, 12)
+    local saveBtn = Btn(f, ns.L["Add"], 90, 24); saveBtn:SetPoint("BOTTOMRIGHT", -12, 10)
+
+    local function ApplyTo(rule)
+        rule.onExpiring = expCk:GetChecked() and true or false
+        rule.expireWarn = draft.expireWarn
+        rule.onReady = rdyCk:GetChecked() and true or false
+        rule.onLowStacks = lsCk:GetChecked() and true or false
+        rule.minStacks = draft.minStacks
+        rule.glow = { on = glowCk:GetChecked() and true or false, color = { r=glowColor.r, g=glowColor.g, b=glowColor.b } }
+        rule.pulse = { on = pulseCk:GetChecked() and true or false, scale = draft.pulseScale }
+        rule.recolor = { on = recolorCk:GetChecked() and true or false, color = { r=recolorColor.r, g=recolorColor.g, b=recolorColor.b } }
+        rule.desaturate = desatCk:GetChecked() and true or false
+        rule.countdown = { on = cdCk:GetChecked() and true or false }
+        rule.sound = {
+            on = sndCk:GetChecked() and true or false,
+            name = sndPick:GetSoundName(),
+            channel = chDD:GetValue() or "Master",
+            loop = loopCk:GetChecked() and true or false,
+            interval = (tonumber(liEb:GetText()) and tonumber(liEb:GetText()) > 0) and tonumber(liEb:GetText()) or 2,
+        }
+    end
+
+    saveBtn:SetScript("OnClick", function()
+        fb:SetText("")
+        if editing then
+            ApplyTo(editing)
+            f:Hide(); if ns.RebuildCdmRules then ns.RebuildCdmRules() end; RefreshCdmRulesList()
+            return
+        end
+        local input = (spEb:GetText() or ""):trim()
+        if input == "" then fb:SetText(ns.L["Enter a name/ID."]); return end
+        local sid, name = ns.GetSpellIDFromInput(input)
+        if not sid then fb:SetText(ns.L["Spell not found: "]..input); return end
+        local list = CDM_rules()
+        for _, r in ipairs(list) do
+            if r.spellID == sid then fb:SetText((name or input)..ns.L[" already monitored."]); return end
+        end
+        local rule = { spellID = sid, name = name, enabled = true }
+        ApplyTo(rule)
+        table.insert(list, rule)
+        f:Hide(); if ns.RebuildCdmRules then ns.RebuildCdmRules() end; RefreshCdmRulesList()
+    end)
+
+    local function Load(rule)
+        draft.expireWarn = tonumber(rule and rule.expireWarn) or 5
+        draft.minStacks = tonumber(rule and rule.minStacks) or 2
+        draft.pulseScale = tonumber(rule and rule.pulse and rule.pulse.scale) or 1.4
+        draft.soundInterval = tonumber(rule and rule.sound and rule.sound.interval) or 2
+        expCk:SetChecked(rule and rule.onExpiring and true or false)
+        rdyCk:SetChecked(rule and rule.onReady and true or false)
+        lsCk:SetChecked(rule and rule.onLowStacks and true or false)
+        glowCk:SetChecked(rule and rule.glow and rule.glow.on and true or false)
+        pulseCk:SetChecked(rule and rule.pulse and rule.pulse.on and true or false)
+        recolorCk:SetChecked(rule and rule.recolor and rule.recolor.on and true or false)
+        desatCk:SetChecked(rule and rule.desaturate and true or false)
+        cdCk:SetChecked(rule and rule.countdown and rule.countdown.on and true or false)
+        sndCk:SetChecked(rule and rule.sound and rule.sound.on and true or false)
+        local gc = (rule and rule.glow and rule.glow.color) or { r=1, g=0.9, b=0.3 }
+        glowColor.r, glowColor.g, glowColor.b = gc.r, gc.g, gc.b; glowSw:UpdateColor()
+        local rc = (rule and rule.recolor and rule.recolor.color) or { r=1, g=0.2, b=0.2 }
+        recolorColor.r, recolorColor.g, recolorColor.b = rc.r, rc.g, rc.b; recolorSw:UpdateColor()
+        sndPick:SetSoundName(rule and rule.sound and rule.sound.name or "Default")
+        chDD:SetValue(rule and rule.sound and rule.sound.channel or "Master")
+        loopCk:SetChecked(rule and rule.sound and rule.sound.loop and true or false)
+        liEb:SetText(tostring(draft.soundInterval))
+        for _, w in ipairs(refreshables) do if w.Refresh then w:Refresh() end end
+    end
+
+    local editor = {}
+    function editor:OpenAdd(prefillID)
+        editing = nil
+        spEb:Enable(); spEb:SetText(prefillID and tostring(prefillID) or "")
+        Load(nil)
+        f.title:SetText("|cff00ccff"..(ns.L["CDM Rule"]).."|r"); saveBtn:SetText(ns.L["Add"])
+        fb:SetText(""); f:Show()
+    end
+    function editor:OpenEdit(rule)
+        editing = rule
+        spEb:SetText(tostring(rule.spellID or "")); spEb:Disable()
+        Load(rule)
+        local info = rule.spellID and C_Spell.GetSpellInfo(rule.spellID)
+        f.title:SetText("|cff00ccff"..ns.L["Editing: "]..(info and info.name or rule.name or "?").."|r")
+        saveBtn:SetText(ns.L["Update"]); fb:SetText(""); f:Show()
+    end
+    return editor
+end
+
+GetCdmRuleEditor = function()
+    if not cdmRuleEditor then cdmRuleEditor = CreateCdmRuleEditor() end
+    return cdmRuleEditor
+end
+
+function BuildCdmEnhancerPage(p)
+    local y = -8
+    local hd = H(p, ns.L["CDM Enhancer"]); hd:SetPoint("TOPLEFT", 8, y); y = y - 18
+    local ht = p:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    ht:SetPoint("TOPLEFT", 8, y); ht:SetWidth(580); ht:SetJustifyH("LEFT")
+    ht:SetText(ns.L["Enhance icons already shown by Blizzard's Cooldown Manager. Effects only apply to spells you've added to the CDM (Edit Mode)."])
+    y = y - 36
+
+    cdmRulesC = ScrollList(p, y, 360); y = y - 368
+
+    local addBtn = Btn(p, ns.L["Add Rule"], 150, 26); addBtn:SetPoint("TOPLEFT", 8, y)
+    addBtn:SetScript("OnClick", function() GetCdmRuleEditor():OpenAdd() end)
+    local dzLabel = p:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    dzLabel:SetText(ns.L["or drag a spell here:"]); dzLabel:SetPoint("LEFT", addBtn, "RIGHT", 10, 0)
+    local dz = DropZone(p, 200, 26, function(id) GetCdmRuleEditor():OpenAdd(id) end)
+    dz:SetPoint("LEFT", dzLabel, "RIGHT", 6, 0)
+
+    RefreshCdmRulesList()
+end
+end  -- do (CDM Enhancer)
+
 -- Page 5: Ring Settings
 local function BuildRingSettingsPage(p)
     local C1,C2=20,340; local y=-8
@@ -4081,39 +4719,117 @@ local function BuildMrtConfigPage(p)
     local y = -8
     local hd = H(p, ns.L["Display configuration"]); hd:SetPoint("TOPLEFT", 8, y); y = y - 28
 
-    local sh = SubH(p, ns.L["Display"]); sh:SetPoint("TOPLEFT", C1, y); local c1y = y - 20
-    local defs1 = {
-        {ns.L["Icon Size"], 16, 96, 2,
-            function() return ns.db.mrtTimeline.iconSize end,
-            function(v) ns.db.mrtTimeline.iconSize = v end},
+    -- Una nota MRT puede mostrarse en VARIOS displays a la vez. Aca cada display
+    -- tiene su propia seccion rotulada (toggle + ajustes) para que quede claro
+    -- que setting configura que. Helper local para sliders en una columna.
+    local function ColSliders(defs, col, yref)
+        for _, d in ipairs(defs) do
+            local s = CreateSlider(p, d[1], d[2], d[3], d[4], d[5], d[6])
+            s:SetPoint("TOPLEFT", col, yref); table.insert(allSliders, s); yref = yref - 48
+        end
+        return yref
+    end
+    local function SectionCheck(label, getter, setter, col, yref)
+        local ck = CreateCheckbox(p, label, getter, setter)
+        ck:SetPoint("TOPLEFT", col, yref); table.insert(allCheckboxes, ck)
+        return ck, yref - 26
+    end
+
+    -- ===== Columna izquierda: Timing + Cursor + Ring + Pulse =====
+    local sh = SubH(p, ns.L["Timing (all displays)"]); sh:SetPoint("TOPLEFT", C1, y); local c1y = y - 20
+    c1y = ColSliders({
         {ns.L["Lead time (s)"], 0, 30, 1,
             function() return ns.db.mrtTimeline.leadTime end,
             function(v) ns.db.mrtTimeline.leadTime = v end},
         {ns.L["Active window (s)"], 1, 60, 1,
             function() return ns.db.mrtTimeline.activeWindow end,
             function(v) ns.db.mrtTimeline.activeWindow = v end},
-        {ns.L["Ring icon size"], 16, 80, 2,
-            function() return ns.db.mrtTimeline.ringIconSize end,
-            function(v) ns.db.mrtTimeline.ringIconSize = v end},
-    }
-    for _, d in ipairs(defs1) do
-        local s = CreateSlider(p, d[1], d[2], d[3], d[4], d[5], d[6])
-        s:SetPoint("TOPLEFT", C1, c1y); table.insert(allSliders, s); c1y = c1y - 48
-    end
+    }, C1, c1y)
 
-    local ph = SubH(p, ns.L["Position"]); ph:SetPoint("TOPLEFT", C2, y); local c2y = y - 20
-    local defs2 = {
+    -- Cursor icons (siguen al mouse)
+    c1y = c1y - 6
+    local curSh = SubH(p, ns.L["Cursor icons"]); curSh:SetPoint("TOPLEFT", C1, c1y); c1y = c1y - 20
+    local _, c1y2 = SectionCheck(ns.L["Show as cursor icons"],
+        function() return ns.db.mrtTimeline.showInCursor end,
+        function(v) ns.db.mrtTimeline.showInCursor = v end, C1, c1y)
+    c1y = c1y2
+    c1y = ColSliders({
+        {ns.L["Icon Size"], 16, 96, 2,
+            function() return ns.db.mrtTimeline.iconSize end,
+            function(v) ns.db.mrtTimeline.iconSize = v; if ns.MrtRefreshFixedMover then ns.MrtRefreshFixedMover() end end},
         {ns.L["Offset X"], -200, 200, 5,
             function() return ns.db.mrtTimeline.offsetX end,
             function(v) ns.db.mrtTimeline.offsetX = v end},
         {ns.L["Offset Y"], -200, 200, 5,
             function() return ns.db.mrtTimeline.offsetY end,
             function(v) ns.db.mrtTimeline.offsetY = v end},
-    }
-    for _, d in ipairs(defs2) do
-        local s = CreateSlider(p, d[1], d[2], d[3], d[4], d[5], d[6])
-        s:SetPoint("TOPLEFT", C2, c2y); table.insert(allSliders, s); c2y = c2y - 48
+    }, C1, c1y)
+
+    -- Ring (anillo del personaje)
+    c1y = c1y - 6
+    local ringSh = SubH(p, ns.L["Ring (character)"]); ringSh:SetPoint("TOPLEFT", C1, c1y); c1y = c1y - 20
+    local _, c1y3 = SectionCheck(ns.L["Show as character ring"],
+        function() return ns.db.mrtTimeline.showInRing end,
+        function(v) ns.db.mrtTimeline.showInRing = v end, C1, c1y)
+    c1y = c1y3
+    c1y = ColSliders({
+        {ns.L["Ring icon size"], 16, 80, 2,
+            function() return ns.db.mrtTimeline.ringIconSize end,
+            function(v) ns.db.mrtTimeline.ringIconSize = v end},
+    }, C1, c1y)
+
+    -- Pulse (icono central). Sus visuales (tamaño/animacion) viven en el menu Pulse.
+    c1y = c1y - 6
+    local pulseSh = SubH(p, ns.L["Pulse"]); pulseSh:SetPoint("TOPLEFT", C1, c1y); c1y = c1y - 20
+    local _, c1y4 = SectionCheck(ns.L["Show as central pulse"],
+        function() return ns.db.mrtTimeline.showInPulse end,
+        function(v) ns.db.mrtTimeline.showInPulse = v end, C1, c1y)
+    c1y = c1y4
+    local pulseNote = p:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    pulseNote:SetPoint("TOPLEFT", C1 + 4, c1y); pulseNote:SetWidth(300); pulseNote:SetJustifyH("LEFT")
+    pulseNote:SetText(ns.L["Pulse visuals (size/animation) are configured in the Pulse menu."])
+    c1y = c1y - 18
+
+    -- ===== Columna derecha: Fixed icon (posicion fija en pantalla) =====
+    -- Modo de placement que NO sigue al cursor: el icono se ancla a un punto fijo
+    -- que el usuario coloca con "Mover" (drag). Tiene tamaño/countdown propios.
+    local fixSh = SubH(p, ns.L["Fixed icon (on screen)"]); fixSh:SetPoint("TOPLEFT", C2, y); local c2y = y - 20
+    local fixCk = CreateCheckbox(p, ns.L["Show at fixed screen position"],
+        function() return ns.db.mrtTimeline.showFixed end,
+        function(v) ns.db.mrtTimeline.showFixed = v end)
+    fixCk:SetPoint("TOPLEFT", C2, c2y); table.insert(allCheckboxes, fixCk); c2y = c2y - 28
+
+    local moveBtn = Btn(p, ns.L["Move"], 120, 22)
+    moveBtn:SetPoint("TOPLEFT", C2, c2y); c2y = c2y - 28
+    local function SyncMoveLabel()
+        moveBtn:SetText(ns.MrtIsFixedUnlocked and ns.MrtIsFixedUnlocked()
+            and ns.L["Lock"] or ns.L["Move"])
     end
+    moveBtn:SetScript("OnClick", function()
+        if ns.MrtToggleFixedMover then ns.MrtToggleFixedMover() end
+        SyncMoveLabel()
+    end)
+    SyncMoveLabel()
+
+    c2y = ColSliders({
+        {ns.L["Offset X"], -960, 960, 5,
+            function() return ns.db.mrtTimeline.fixedX end,
+            function(v) ns.db.mrtTimeline.fixedX = v; if ns.MrtRefreshFixed then ns.MrtRefreshFixed() end end},
+        {ns.L["Offset Y"], -540, 540, 5,
+            function() return ns.db.mrtTimeline.fixedY end,
+            function(v) ns.db.mrtTimeline.fixedY = v; if ns.MrtRefreshFixed then ns.MrtRefreshFixed() end end},
+        {ns.L["Fixed icon size (0=global):"], 0, 128, 2,
+            function() return ns.db.mrtTimeline.fixedIconSize end,
+            function(v) ns.db.mrtTimeline.fixedIconSize = v; if ns.MrtRefreshFixedMover then ns.MrtRefreshFixedMover() end end},
+        {ns.L["Countdown size (0=default):"], 0, 64, 1,
+            function() return ns.db.mrtTimeline.fixedCountdownSize end,
+            function(v) ns.db.mrtTimeline.fixedCountdownSize = v end},
+    }, C2, c2y)
+
+    local fixHideCd = CreateCheckbox(p, ns.L["Hide countdown (fixed)"],
+        function() return ns.db.mrtTimeline.fixedHideCountdown end,
+        function(v) ns.db.mrtTimeline.fixedHideCountdown = v end)
+    fixHideCd:SetPoint("TOPLEFT", C2, c2y); table.insert(allCheckboxes, fixHideCd); c2y = c2y - 28
 
     -- ==================== Sound on trigger ====================
     -- Fila Sound: checkbox enable + SoundPicker (LSM-aware) + channel + Test.
@@ -5743,6 +6459,8 @@ local function BuildGeneralPage(p)
     -- metodo no existe, skipeamos sin error.
     local FEATURE_TOGGLES = {
         { key = "cursorDisplay",   labelKey = "Cursor",        refresh = "RefreshCursorDisplay" },
+        { key = "fixedPanels",     labelKey = "Fixed Panels",  refresh = "RefreshFixedPanels"  },
+        { key = "cdmEnhancer",     labelKey = "CDM Enhancer",  refresh = "RefreshCdmEnhancer"  },
         { key = "ringDisplay",     labelKey = "Ring",          refresh = "RefreshRingDisplay"   },
         { key = "cooldownPulse",   labelKey = "Pulse",         refresh = "RefreshCooldownPulse" },
         { key = "cursorRing",      labelKey = "Cursor Ring",   refresh = "RefreshCursorRing"    },
@@ -6502,6 +7220,8 @@ function ns:CreateConfigWindow()
             {name=ns.L["Auras"],  builder=BuildCursorAurasPage},
             {name=ns.L["Config"], builder=BuildCursorSettingsPage},
         }},
+        {name=ns.L["Fixed Panels"], enabledKey="fixedPanels", builder=BuildFixedPanelsPage},
+        {name=ns.L["CDM Enhancer"], enabledKey="cdmEnhancer", builder=BuildCdmEnhancerPage},
         {name=ns.L["Ring"], enabledKey="ringDisplay", subtabs={
             {name=ns.L["Auras"],  builder=BuildRingAurasPage},
             {name=ns.L["Config"], builder=BuildRingSettingsPage},
@@ -6745,6 +7465,11 @@ function ns:CreateConfigWindow()
     mainWindow:SetScript("OnShow",function()
         for j,b in ipairs(menuButtons) do b._active=(j==1) end
         ShowPage(1); RefreshAllSpellLists()
+    end)
+    -- Al cerrar el config, bloquear los movers de los Fixed Panels que hayan
+    -- quedado desbloqueados (evita que el chrome translucido siga visible).
+    mainWindow:HookScript("OnHide", function()
+        if ns.FixedPanelLockAll then ns.FixedPanelLockAll() end
     end)
     menuButtons[1]._active=true
     ShowPage(1)

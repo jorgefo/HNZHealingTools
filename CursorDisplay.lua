@@ -31,8 +31,12 @@ local function ApplyFontSize(fontString, size)
     if font then fontString:SetFont(font, size, flags or "OUTLINE") end
 end
 
-local function CreateIconFrame(parent, index)
-    local size = ns.db.cursorDisplay.iconSize
+-- Constructor compartido de icon frame. `cfg` provee iconSize/fontSize iniciales
+-- (default ns.db.cursorDisplay). Expuesto en ns para que FixedPanels.lua cree
+-- iconos identicos a los del cursor sin duplicar el layout de subregiones.
+local function BuildIconFrame(parent, cfg)
+    cfg = cfg or ns.db.cursorDisplay
+    local size = cfg.iconSize or 28
     local f = CreateFrame("Frame", nil, parent)
     f:SetSize(size, size); f:EnableMouse(false)
 
@@ -44,12 +48,12 @@ local function CreateIconFrame(parent, index)
     f.icon = icon
 
     local text = f:CreateFontString(nil,"OVERLAY")
-    text:SetFont(STANDARD_TEXT_FONT, ns.db.cursorDisplay.fontSize or 12, "OUTLINE")
+    text:SetFont(STANDARD_TEXT_FONT, cfg.fontSize or 12, "OUTLINE")
     text:SetPoint("CENTER",0,0); text:SetJustifyH("CENTER"); text:SetShadowOffset(1,-1)
     f.text = text
 
     local chargeText = f:CreateFontString(nil,"OVERLAY")
-    chargeText:SetFont(STANDARD_TEXT_FONT, ns.db.cursorDisplay.fontSize or 12, "OUTLINE")
+    chargeText:SetFont(STANDARD_TEXT_FONT, cfg.fontSize or 12, "OUTLINE")
     chargeText:SetPoint("BOTTOMRIGHT",-1,1); chargeText:SetJustifyH("RIGHT"); chargeText:SetShadowOffset(1,-1)
     f.chargeText = chargeText
 
@@ -58,6 +62,12 @@ local function CreateIconFrame(parent, index)
     f.statusBorder = statusBorder
 
     f:Hide()
+    return f
+end
+ns.CreateTrackedIconFrame = BuildIconFrame
+
+local function CreateIconFrame(parent, index)
+    local f = BuildIconFrame(parent, ns.db.cursorDisplay)
     iconPool[index] = f
     return f
 end
@@ -67,20 +77,23 @@ local function GetOrCreateIcon(index)
     return CreateIconFrame(displayFrame, index)
 end
 
-local function UpdateIconAppearance(iconFrame, data, entry)
+-- `cfg` provee los globales iconSize/fontSize/opacity (default ns.db.cursorDisplay).
+-- FixedPanels.lua pasa la config de su panel para que cada panel use SUS tamaños.
+local function UpdateIconAppearance(iconFrame, data, entry, expiring, cfg)
+    cfg = cfg or ns.db.cursorDisplay
     -- Per-entry override de iconSize: si entry.iconSize > 0, gana sobre el global.
     -- Para iconos en grid los tamaños custom pueden desbordar la celda (calculada
     -- con global iconSize); el usuario asume responsabilidad de eso, o usa
     -- useCustomPosition para sacar el icono del grid.
-    local globalSize = ns.db.cursorDisplay.iconSize
+    local globalSize = cfg.iconSize or 28
     local size = (entry and entry.iconSize and entry.iconSize > 0) and entry.iconSize or globalSize
-    local fontSize = ns.db.cursorDisplay.fontSize or 12
+    local fontSize = cfg.fontSize or 12
     local stackFontSize = (entry and entry.stackFontSize and entry.stackFontSize > 0) and entry.stackFontSize or fontSize
     iconFrame:SetSize(size, size)
     -- Per-entry alpha override. displayFrame se mantiene en alpha 1 (ver
     -- InitCursorDisplay/RefreshCursorDisplay); cada icono aplica el suyo asi
     -- override per-entry queda absoluto y no se multiplica por el global.
-    local globalAlpha = ns.db.cursorDisplay.opacity or 1
+    local globalAlpha = cfg.opacity or 1
     local alpha = (entry and entry.opacity and entry.opacity > 0) and entry.opacity or globalAlpha
     iconFrame:SetAlpha(alpha)
     iconFrame.icon:SetTexture(ns.GetEntryIcon(entry, data.icon))
@@ -118,6 +131,14 @@ local function UpdateIconAppearance(iconFrame, data, entry)
         if type(pubCharges) == "number" and pubCharges >= 1 then
             iconFrame.chargeText:SetText(pubCharges); iconFrame.chargeText:Show()
         end
+    elseif expiring then
+        -- Ventana de aviso de expiracion: mostramos la cuenta atras del tiempo
+        -- restante (en el centro) y NO los stacks — el usuario pidio ver cuanto
+        -- falta para que caiga, en vez del numero de acumulaciones.
+        if data.remaining and data.remaining > 0 then
+            iconFrame.text:SetText(ns.FormatDuration(data.remaining))
+        end
+        -- chargeText queda oculto (ya se limpio/oculto arriba).
     else
         if data.cooldownRemaining and data.cooldownRemaining > 0 then
             iconFrame.text:SetText(ns.FormatDuration(data.cooldownRemaining))
@@ -131,7 +152,9 @@ local function UpdateIconAppearance(iconFrame, data, entry)
             iconFrame.chargeText:SetText(data.stacks); iconFrame.chargeText:Show()
         end
     end
-    if entry and entry.hideTimer then iconFrame.text:SetText("") end
+    -- hideTimer oculta la cuenta atras normal, pero NO durante el aviso de
+    -- expiracion: ahi el tiempo restante es justamente lo que se quiere ver.
+    if entry and entry.hideTimer and not expiring then iconFrame.text:SetText("") end
     -- Guardamos la entry para que el pass de layout en UpdateData pueda
     -- distinguir grid vs detached y aplicar offsets per-entry. Tambien
     -- guardamos `size` ya resuelto para que el layout no lo recalcule.
@@ -139,6 +162,81 @@ local function UpdateIconAppearance(iconFrame, data, entry)
     iconFrame._renderSize = size
     iconFrame:Show()
 end
+-- Render compartido cursor + fixed panels: misma apariencia (charges, stacks,
+-- aviso de expiracion, status colors, overrides per-entry). cfg = globales del
+-- consumidor (cursorDisplay o un panel fijo).
+ns.RenderTrackedIcon = UpdateIconAppearance
+
+-- ============================================================
+-- Evaluadores de entry compartidos (cursor + fixed panels).
+-- Deciden si una entry debe dibujarse y devuelven su status ya resuelto, para
+-- que ambos consumidores rendericen con EXACTAMENTE la misma logica (visibility,
+-- spec/talento/instancia, hideOnCooldown, minCharges con manejo de SecureNumber,
+-- showWhen y aviso de expiracion). Status nil + show=false cuando la entry no
+-- pasa los filtros de carga (no se llama GetEntryStatus en ese caso).
+-- ============================================================
+
+-- Spell/Item entry → (status, show). show=false si filtros de carga no pasan o
+-- la entry esta oculta por hideOnCooldown / minCharges.
+local function EvalSpellEntry(entry, inCombat)
+    if not (entry.enabled and ns.IsEntryAllowedForCurrentSpec(entry) and ns.IsEntryAllowedForRequiredTalent(entry)
+        and ns.IsEntryAllowedForCurrentInstance(entry) and ns.MatchesVisibility(entry.visibility, inCombat)) then
+        return nil, false
+    end
+    -- Dispatcher: la misma lista mezcla entries spell-based (legacy) y item-based
+    -- (trinkets/use-items). GetEntryStatus elige la API correcta.
+    local status = ns:GetEntryStatus(entry)
+    local hide = entry.hideOnCooldown and status.status == "COOLDOWN"
+    if not hide and entry.minCharges and entry.minCharges > 0 then
+        local pubCharges = ns.ToPublic(status.charges)
+        local pubMax = ns.ToPublic(status.maxCharges)
+        if type(pubCharges) == "number" then
+            -- Best case: we have a public count.
+            if pubCharges < entry.minCharges then hide = true end
+        elseif status.hasCharges and status.chargesFull ~= nil then
+            -- SN-tainted count, but isActive (public bool) is reliable:
+            -- chargesFull=true => current==max; chargesFull=false => current<max.
+            if status.chargesFull then
+                -- Full. If we know max publicly, gate on max>=minCharges; if not,
+                -- assume the user configured a sane minCharges and show.
+                if type(pubMax) == "number" and pubMax < entry.minCharges then hide = true end
+            else
+                -- At least one charge missing. We can only be sure to show when
+                -- minCharges <= max-1; without pubMax, hide to be safe (otherwise
+                -- a user with minCharges=2 on a 2-charge spell sees the icon at 1/2).
+                if type(pubMax) == "number" then
+                    if entry.minCharges > (pubMax - 1) then hide = true end
+                else
+                    hide = true
+                end
+            end
+        end
+        -- else: no charges info at all (single-target spell w/o charges) — leave as is.
+    end
+    return status, (not hide)
+end
+ns.EvalCursorSpellEntry = EvalSpellEntry
+
+-- Aura entry → (status, show, expiring). expiring = ventana de aviso de
+-- expiracion (fuerza show aunque showWhen lo oculte; mismo criterio que la alarma).
+local function EvalAuraEntry(entry, inCombat)
+    if not (entry.enabled and ns.IsEntryAllowedForCurrentSpec(entry) and ns.IsEntryAllowedForRequiredTalent(entry)
+        and ns.IsEntryAllowedForCurrentInstance(entry) and ns.MatchesVisibility(entry.visibility, inCombat)) then
+        return nil, false, false
+    end
+    local status = ns:GetAuraStatus(entry.spellID, entry.unit, entry.filter, entry.manualDuration)
+    local showWhen = entry.showWhen or "ALWAYS"
+    local show = false
+    if showWhen=="ALWAYS" then show=true
+    elseif showWhen=="MISSING" then show=(status.status=="MISSING")
+    elseif showWhen=="ACTIVE" then show=(status.status=="ACTIVE")
+    elseif showWhen=="BELOW_STACKS" then show=(status.status=="MISSING") or (status.stacks<(entry.minStacks or 0))
+    end
+    local expiring = ns.IsExpiryWarn(entry, status)
+    if not show and expiring then show=true end
+    return status, show, expiring
+end
+ns.EvalCursorAuraEntry = EvalAuraEntry
 
 -- Reportado por UpdateData: true si algun spell/aura tiene timer ticking
 -- (cooldownRemaining > 0 o aura.remaining > 0). El OnUpdate lo usa para decidir
@@ -151,64 +249,20 @@ local function UpdateData()
     local anyTimer = false
 
     for _, entry in ipairs(db.cursorSpells) do
-        if entry.enabled and ns.IsEntryAllowedForCurrentSpec(entry) and ns.IsEntryAllowedForRequiredTalent(entry)
-           and ns.IsEntryAllowedForCurrentInstance(entry)
-           and ns.MatchesVisibility(entry.visibility, inCombat) then
-            -- Dispatcher: la misma lista mezcla entries spell-based (legacy) y
-            -- item-based (trinkets/use-items). GetEntryStatus elige la API correcta.
-            local status = ns:GetEntryStatus(entry)
-            if status.cooldownRemaining and status.cooldownRemaining > 0 then anyTimer = true end
-            local hide = entry.hideOnCooldown and status.status == "COOLDOWN"
-            if not hide and entry.minCharges and entry.minCharges > 0 then
-                local pubCharges = ns.ToPublic(status.charges)
-                local pubMax = ns.ToPublic(status.maxCharges)
-                if type(pubCharges) == "number" then
-                    -- Best case: we have a public count.
-                    if pubCharges < entry.minCharges then hide = true end
-                elseif status.hasCharges and status.chargesFull ~= nil then
-                    -- SN-tainted count, but isActive (public bool) is reliable:
-                    -- chargesFull=true => current==max; chargesFull=false => current<max.
-                    if status.chargesFull then
-                        -- Full. If we know max publicly, gate on max>=minCharges; if not,
-                        -- assume the user configured a sane minCharges and show.
-                        if type(pubMax) == "number" and pubMax < entry.minCharges then hide = true end
-                    else
-                        -- At least one charge missing. We can only be sure to show when
-                        -- minCharges <= max-1; without pubMax, hide to be safe (otherwise
-                        -- a user with minCharges=2 on a 2-charge spell sees the icon at 1/2).
-                        if type(pubMax) == "number" then
-                            if entry.minCharges > (pubMax - 1) then hide = true end
-                        else
-                            hide = true
-                        end
-                    end
-                end
-                -- else: no charges info at all (single-target spell w/o charges) — leave as is.
-            end
-            if not hide then
-                iconIndex = iconIndex + 1
-                UpdateIconAppearance(GetOrCreateIcon(iconIndex), status, entry)
-            end
+        local status, show = EvalSpellEntry(entry, inCombat)
+        if status and status.cooldownRemaining and status.cooldownRemaining > 0 then anyTimer = true end
+        if show then
+            iconIndex = iconIndex + 1
+            UpdateIconAppearance(GetOrCreateIcon(iconIndex), status, entry)
         end
     end
 
     for _, entry in ipairs(db.cursorAuras) do
-        if entry.enabled and ns.IsEntryAllowedForCurrentSpec(entry) and ns.IsEntryAllowedForRequiredTalent(entry)
-           and ns.IsEntryAllowedForCurrentInstance(entry)
-           and ns.MatchesVisibility(entry.visibility, inCombat) then
-            local status = ns:GetAuraStatus(entry.spellID, entry.unit, entry.filter, entry.manualDuration)
-            if status.remaining and status.remaining > 0 then anyTimer = true end
-            local showWhen = entry.showWhen or "ALWAYS"
-            local show = false
-            if showWhen=="ALWAYS" then show=true
-            elseif showWhen=="MISSING" then show=(status.status=="MISSING")
-            elseif showWhen=="ACTIVE" then show=(status.status=="ACTIVE")
-            elseif showWhen=="BELOW_STACKS" then show=(status.status=="MISSING") or (status.stacks<(entry.minStacks or 0))
-            end
-            if show then
-                iconIndex = iconIndex + 1
-                UpdateIconAppearance(GetOrCreateIcon(iconIndex), status, entry)
-            end
+        local status, show, expiring = EvalAuraEntry(entry, inCombat)
+        if status and status.remaining and status.remaining > 0 then anyTimer = true end
+        if show then
+            iconIndex = iconIndex + 1
+            UpdateIconAppearance(GetOrCreateIcon(iconIndex), status, entry, expiring)
         end
     end
 

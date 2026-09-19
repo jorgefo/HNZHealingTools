@@ -26,7 +26,10 @@ local addonName, ns = ...
 -- ============================================================
 
 local frame              -- container anchored al cursor que hostea los iconos
-local iconPool = {}      -- pool de { frame=, tex=, countdown= }
+local iconPool = {}      -- pool de { frame=, tex=, countdown= } para cursor
+local fixedFrame         -- container anclado a un punto fijo de pantalla (movible)
+local fixedIconPool = {} -- pool separado de iconos para el fixed display
+local fixedUnlocked = false  -- runtime: true cuando el usuario esta posicionando el frame
 local entries = {}       -- entries de la nota activa con runtime state
 local activeEncounterID  -- id del encuentro actual (o test); nil si no hay
 local encounterStart     -- GetTime() del pull (o nil)
@@ -326,6 +329,7 @@ function ns.GetMrtActiveEncounterID() return activeEncounterID end
 
 local function HideAllIcons()
     for _, ic in ipairs(iconPool) do ic.frame:Hide() end
+    for _, ic in ipairs(fixedIconPool) do ic.frame:Hide() end
 end
 
 -- ============================================================
@@ -447,11 +451,13 @@ local function HideMrtRing()
     if mrtRingFrame then mrtRingFrame:Hide() end
 end
 
-local function AcquireIcon()
-    for _, ic in ipairs(iconPool) do
+-- Pool generico: reusa un icono libre de `pool`, o crea uno nuevo parentado a
+-- `parent`. Mismo struct para cursor y fixed display.
+local function AcquireIcon(pool, parent)
+    for _, ic in ipairs(pool) do
         if not ic.frame:IsShown() then return ic end
     end
-    local fr = CreateFrame("Frame", nil, frame)
+    local fr = CreateFrame("Frame", nil, parent)
     fr:Hide()
     local tex = fr:CreateTexture(nil, "ARTWORK")
     tex:SetAllPoints(fr)
@@ -462,8 +468,167 @@ local function AcquireIcon()
     cd:SetShadowColor(0, 0, 0, 1)
     cd:SetShadowOffset(2, -2)
     local ic = { frame = fr, tex = tex, countdown = cd }
-    table.insert(iconPool, ic)
+    table.insert(pool, ic)
     return ic
+end
+
+-- Dibuja una entry en un slot horizontal de `host`. Compartido por cursor y
+-- fixed display: estado PRE = icono dim + countdown; ACTIVE = icono saturado.
+-- `hideCd`/`cdSize` son overrides opcionales del countdown (los usa el fixed
+-- display; el cursor pasa nil → countdown visible con la fuente por defecto).
+local function DrawStackedIcon(ic, host, slot, e, state, now, size, hideCd, cdSize)
+    ic.frame:SetSize(size, size)
+    ic.tex:SetTexture(GetSpellTexture(e.spellID))
+    ic.frame:ClearAllPoints()
+    ic.frame:SetPoint("CENTER", host, "CENTER", slot * (size + 4), 0)
+    if state == "pre" and not hideCd then
+        ic.tex:SetDesaturated(true)
+        ic.tex:SetVertexColor(0.6, 0.6, 0.6, 1)
+        -- Tamaño del countdown: cdSize>0 lo fuerza; 0 = font object por defecto.
+        if cdSize and cdSize > 0 then
+            local f, _, fl = ic.countdown:GetFont()
+            if f then ic.countdown:SetFont(f, cdSize, fl or "OUTLINE") end
+        else
+            ic.countdown:SetFontObject("GameFontNormalHuge")
+        end
+        ic.countdown:SetText(tostring(math.max(1, math.ceil(e.time - now))))
+        ic.countdown:Show()
+    elseif state == "pre" then
+        -- PRE pero con countdown oculto: icono dim, sin numero.
+        ic.tex:SetDesaturated(true)
+        ic.tex:SetVertexColor(0.6, 0.6, 0.6, 1)
+        ic.countdown:Hide()
+    else
+        ic.tex:SetDesaturated(false)
+        ic.tex:SetVertexColor(1, 1, 1, 1)
+        ic.countdown:Hide()
+    end
+    ic.frame:Show()
+end
+
+-- ============================================================
+-- Fixed display (posicion fija movible)
+--
+-- Tercer modo de placement ademas de cursor/ring: en vez de seguir al mouse,
+-- los iconos se anclan a un punto fijo de la pantalla que el usuario coloca
+-- arrastrando el frame. La posicion se guarda como offset desde el CENTER de
+-- UIParent (cfg.fixedX/fixedY) — mismo contrato que ReadyCheckPanel para que
+-- sea estable ante cambios de resolucion.
+-- ============================================================
+local EnsureFixedFrame, PositionFixedFrame, ApplyFixedMover
+
+function EnsureFixedFrame()
+    if fixedFrame then return fixedFrame end
+    local f = CreateFrame("Frame", "HNZHealingToolsMrtFixed", UIParent)
+    f:SetSize(48, 48)
+    f:SetFrameStrata("TOOLTIP")
+    f:SetFrameLevel(101)
+    f:SetClampedToScreen(true)
+    f:SetMovable(true)
+    f:EnableMouse(false)
+
+    -- Chrome visible solo en modo "unlocked" (ApplyFixedMover): caja translucida
+    -- + label, asi el frame se puede ver y arrastrar aunque no haya entries.
+    f.moverBg = f:CreateTexture(nil, "BACKGROUND")
+    f.moverBg:SetAllPoints(f)
+    f.moverBg:SetColorTexture(0.1, 0.6, 1.0, 0.35)
+    f.moverBg:Hide()
+    f.moverBorder = f:CreateTexture(nil, "BORDER")
+    f.moverBorder:SetPoint("TOPLEFT", f, "TOPLEFT", -1, 1)
+    f.moverBorder:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", 1, -1)
+    f.moverBorder:SetColorTexture(0.3, 0.8, 1.0, 0.9)
+    f.moverBorder:Hide()
+    f.moverLabel = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    f.moverLabel:SetPoint("BOTTOM", f, "TOP", 0, 2)
+    f.moverLabel:SetText("MRT/NSRT")
+    f.moverLabel:Hide()
+
+    -- Icono de muestra que se ve SOLO en modo unlocked, dimensionado al tamaño
+    -- real del fixed display, para previsualizar el tamaño/posicion al arrastrar.
+    f.moverIcon = f:CreateTexture(nil, "ARTWORK")
+    f.moverIcon:SetPoint("TOPLEFT", 1, -1); f.moverIcon:SetPoint("BOTTOMRIGHT", -1, 1)
+    f.moverIcon:SetTexture("Interface\\Icons\\Spell_Nature_HealingTouch")
+    f.moverIcon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+    f.moverIcon:Hide()
+
+    f:RegisterForDrag("LeftButton")
+    f:SetScript("OnDragStart", function(self) self:StartMoving() end)
+    f:SetScript("OnDragStop", function(self)
+        self:StopMovingOrSizing()
+        local cx, cy = self:GetCenter()
+        local pcx, pcy = UIParent:GetCenter()
+        local cfg = GetCfg()
+        if cx and pcx and cfg then
+            cfg.fixedX = math.floor((cx - pcx) + 0.5)
+            cfg.fixedY = math.floor((cy - pcy) + 0.5)
+        end
+        -- Re-anclar al contrato CENTER+offset: StartMoving cambia el anchor a
+        -- BOTTOMLEFT, lo restauramos para que el guardado quede consistente.
+        PositionFixedFrame()
+    end)
+    fixedFrame = f
+    return f
+end
+
+function PositionFixedFrame()
+    EnsureFixedFrame()
+    local cfg = GetCfg() or {}
+    fixedFrame:ClearAllPoints()
+    fixedFrame:SetPoint("CENTER", UIParent, "CENTER", cfg.fixedX or 0, cfg.fixedY or 0)
+end
+
+-- Tamaño efectivo del fixed display: override propio (fixedIconSize>0) o el
+-- iconSize global del MRT como fallback. Mismo criterio que UpdateIcons.
+local function FixedMoverSize()
+    local cfg = GetCfg() or {}
+    local s = (cfg.fixedIconSize and cfg.fixedIconSize > 0) and cfg.fixedIconSize or (cfg.iconSize or 40)
+    if s < 8 then s = 8 end
+    return s
+end
+
+-- Aplica el estado lock/unlock al chrome del mover. Unlocked = mouse habilitado
+-- + caja/borde/label/icono de muestra visibles, con el frame dimensionado al
+-- tamaño real del fixed display (asi el recuadro que arrastras crece al agrandar
+-- el icono). Locked = el frame vuelve a ser un anchor chico (los iconos reales se
+-- anclan a su CENTER, no a su tamaño).
+function ApplyFixedMover()
+    EnsureFixedFrame()
+    local on = fixedUnlocked
+    if on then
+        local s = FixedMoverSize()
+        fixedFrame:SetSize(s, s)
+    else
+        fixedFrame:SetSize(48, 48)
+    end
+    fixedFrame:EnableMouse(on)
+    fixedFrame.moverBg:SetShown(on)
+    fixedFrame.moverBorder:SetShown(on)
+    fixedFrame.moverLabel:SetShown(on)
+    fixedFrame.moverIcon:SetShown(on)
+    if on then fixedFrame:Show() end
+end
+
+-- Toggle invocado desde el config. Devuelve el nuevo estado (true=unlocked).
+function ns.MrtToggleFixedMover()
+    fixedUnlocked = not fixedUnlocked
+    EnsureFixedFrame()
+    PositionFixedFrame()
+    ApplyFixedMover()
+    return fixedUnlocked
+end
+
+function ns.MrtIsFixedUnlocked() return fixedUnlocked end
+
+-- Re-aplica la posicion desde cfg.fixedX/fixedY. Lo llama el config al mover los
+-- sliders para que el cambio se vea en vivo aunque no estemos en un encuentro.
+function ns.MrtRefreshFixed()
+    if fixedFrame and not fixedUnlocked then PositionFixedFrame() end
+end
+
+-- Re-dimensiona el recuadro del mover en vivo (al cambiar el slider de tamaño del
+-- fixed display mientras se esta posicionando). Solo aplica en modo unlocked.
+function ns.MrtRefreshFixedMover()
+    if fixedFrame and fixedUnlocked then ApplyFixedMover() end
 end
 
 -- Computa el estado visual de una entry en `now`. Devuelve "pre", "active",
@@ -591,8 +756,9 @@ local function UpdateIcons(now, cfg)
     -- deje iconos huerfanos. Si esta on los re-renderizamos abajo.
     HideAllIcons()
     local size = cfg.iconSize or 40
-    local spacing = 4
-    local visible = 0
+    local visible = 0       -- slots ocupados en cursor display
+    local fixedVisible = 0  -- slots ocupados en fixed display
+    if cfg.showFixed then EnsureFixedFrame() end
     local ringActiveEntry  -- la entry "mas urgente" para mostrar en el ring overlay
     local ringActiveState  -- "pre" o "active" — controla rendering del icono
 
@@ -639,24 +805,17 @@ local function UpdateIcons(now, cfg)
 
         -- Cursor icons: stacked horizontally cerca del cursor.
         if state and cfg.showInCursor then
-            local ic = AcquireIcon()
-            ic.frame:SetSize(size, size)
-            ic.tex:SetTexture(GetSpellTexture(e.spellID))
-            ic.frame:ClearAllPoints()
-            ic.frame:SetPoint("CENTER", frame, "CENTER", visible * (size + spacing), 0)
-            if state == "pre" then
-                ic.tex:SetDesaturated(true)
-                ic.tex:SetVertexColor(0.6, 0.6, 0.6, 1)
-                local remaining = math.ceil(e.time - now)
-                ic.countdown:SetText(tostring(math.max(1, remaining)))
-                ic.countdown:Show()
-            else
-                ic.tex:SetDesaturated(false)
-                ic.tex:SetVertexColor(1, 1, 1, 1)
-                ic.countdown:Hide()
-            end
-            ic.frame:Show()
+            DrawStackedIcon(AcquireIcon(iconPool, frame), frame, visible, e, state, now, size)
             visible = visible + 1
+        end
+
+        -- Fixed icons: mismo stack pero anclado al frame de posicion fija, con
+        -- tamaño de icono y countdown propios (override del global).
+        if state and cfg.showFixed then
+            local fixedSize = (cfg.fixedIconSize and cfg.fixedIconSize > 0) and cfg.fixedIconSize or size
+            DrawStackedIcon(AcquireIcon(fixedIconPool, fixedFrame), fixedFrame, fixedVisible, e, state, now,
+                fixedSize, cfg.fixedHideCountdown, cfg.fixedCountdownSize)
+            fixedVisible = fixedVisible + 1
         end
     end
 
@@ -723,6 +882,9 @@ function ns:InitMrtTimeline()
     frame:SetFrameLevel(101)
     frame:EnableMouse(false)
 
+    EnsureFixedFrame()
+    PositionFixedFrame()
+
     local ev = CreateFrame("Frame")
     ev:RegisterEvent("ENCOUNTER_START")
     ev:RegisterEvent("ENCOUNTER_END")
@@ -749,6 +911,10 @@ function ns:InitMrtTimeline()
         frame:ClearAllPoints()
         frame:SetPoint("CENTER", UIParent, "BOTTOMLEFT",
             cx + (cfg.offsetX or 0), cy + (cfg.offsetY or 60))
+        -- Fixed frame: re-anclar cada frame para reflejar cambios de offset en
+        -- vivo. Mientras el usuario lo arrastra (unlocked) StartMoving controla
+        -- la posicion, asi que no peleamos con el drag.
+        if cfg.showFixed and not fixedUnlocked then PositionFixedFrame() end
         UpdateIcons(GetTime() - encounterStart, cfg)
     end)
 end

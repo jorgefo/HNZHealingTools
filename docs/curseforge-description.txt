@@ -1,0 +1,46 @@
+[h1]HNZ Healing Tools[/h1]
+
+A complete heads-up toolkit for Retail healers and cooldown-heavy specs. Track your spells, auras, cooldowns and raid utility through clean, fully-configurable displays — so you can watch the fight instead of your action bars, chat, or unit frames.
+
+[hr]
+
+[h2]Displays[/h2]
+[list]
+[*][b]Cursor Icons[/b] — tracked spells (cooldown sweep, charges, range/power) and auras (stacks + remaining time) floating right next to your mouse.
+[*][b]Character Rings[/b] — concentric progress rings around your character that drain as an aura expires. Per-aura color and optional icon.
+[*][b]Cooldown Pulse[/b] — a big center-screen flash the moment a key spell comes off cooldown or a buff is gained.
+[*][b]Cursor Ring[/b] (optional) — cast-progress wedge, mouse trail, and particle sparkle effects.
+[/list]
+
+[hr]
+
+[h2]Raid & group utility[/h2]
+[list]
+[*][b]Ready Check Panel[/b] — pops on /readycheck with a visual pull-ready checklist: food, flask, augment rune, weapon imbue, class buffs, healthstone, mana, and your talent loadout. If you cast a group buff (Skyfury, Fortitude, Intellect…), the row stays red until every living member actually has it. One-click talent-loadout switching per content type.
+[*][b]Combat Resurrection tracker[/b] — see your group's shared battle-res charges in raids and Mythic+, on any class (you don't need a brez yourself). Shows how many are available, or counts down to the next charge. Shamans also get a Reincarnation self-res indicator.
+[*][b]Raid Spells comms[/b] (alpha) — broadcasts your major healing cooldowns to other healers running the addon and shows who used what, and how long ago.
+[*][b]MRT / NSRT timeline reminders[/b] — reads your Method Raid Tools / Northern Sky raid notes and reminds you of your assigned spells as the trigger approaches, with optional pre-recorded voice callouts.
+[/list]
+
+[hr]
+
+[h2]Quality of life[/h2]
+[list]
+[*][b]Auction House Restock[/b] — a curated shopping list with per-item target counts and max prices, plus a guided buy flow with price history and "price spike" warnings.
+[*][b]Macros & API[/b] — fire any display from a macro with a trigger key, or from another addon.
+[*][b]Item tracking[/b] — trinkets, potions and on-use consumables, by drag-and-drop.
+[*][b]Profiles[/b] — per-character, account-wide and shareable across alts, with versioned migrations and automatic backups.
+[*][b]Localized[/b] in 8 languages: English, Spanish, German, French, Korean, Brazilian Portuguese, Russian, Simplified Chinese.
+[/list]
+
+[hr]
+
+[h2]Built to behave[/h2]
+
+Taint-safe event handling in combat, SecureNumber-aware cooldown/aura reads for recent patches, a three-layer fallback that catches hidden auras, and event-driven polling that only works when something actually changes.
+
+[hr]
+
+[b]Getting started:[/b] type [b]/hht[/b] (or [b]/hnz[/b]) to open the config. Every display, color, size and position is configurable, and every entry can be scoped to specific content (Raid, Mythic+, Dungeon, PvP, Delve, Open World). A draggable minimap button gives quick access — left-click for config, right-click to toggle displays.
+
+[i]Works on World of Warcraft Retail (Midnight, 12.0.x). Optional: LibSharedMedia-3.0 for an expanded sound library.[/i]

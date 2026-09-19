@@ -22,7 +22,9 @@ Core.lua
 Utils.lua
 SpellMonitor.lua
 AuraMonitor.lua
+CdmEnhancer.lua
 CursorDisplay.lua
+FixedPanels.lua
 RingDisplay.lua
 CooldownPulse.lua
 CursorRing.lua

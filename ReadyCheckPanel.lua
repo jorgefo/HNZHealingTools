@@ -185,6 +185,7 @@ local KNOWN_BUFF_SPELLIDS = {
         1232585, -- Well Fed aura desde food no listada (reportado 2026-05-17)
         1285644, -- Well Fed aura desde food no listada (reportado 2026-05-17)
         1233724, -- Well Fed aura desde food no listada (reportado 2026-05-24)
+        1294727, -- Well Fed aura desde food no listada (reportado 2026-06-23)
     },
     flask = {
         1235108, -- Phial aura desde caldero de banda (reportado 2026-05-25)
@@ -1008,6 +1009,7 @@ local UNKNOWN_ITEM_ICON = "Interface\\Icons\\INV_Misc_QuestionMark"
 -- Formato compacto del tiempo restante. >1h: "1h23m"; >1m: "23m"; sino "45s".
 -- Devuelve "" si no hay expirationTime o ya expiro.
 local function FormatTimeRemaining(expirationTime)
+    expirationTime = ns.ToPublic(expirationTime)
     if not expirationTime or expirationTime == 0 then return "" end
     local remaining = expirationTime - GetTime()
     if remaining <= 0 then return "" end
@@ -1840,12 +1842,13 @@ local function ConfigureCell(cell, cellW, cellH, iconSize, btnH, fontScale, data
     -- buffs) o repetido entre cells de la misma seccion (foods/flasks/runas:
     -- todas las cells comparten la expiracion del buff vigente).
     local remaining = nil
-    if data.expirationTime and data.expirationTime > 0 then
-        remaining = data.expirationTime - GetTime()
+    local pubExp = ns.ToPublic(data.expirationTime)
+    if pubExp and pubExp > 0 then
+        remaining = pubExp - GetTime()
     end
     if remaining and remaining > 0 then
         if data.showTimeText then
-            cell.timeText:SetText(FormatTimeRemaining(data.expirationTime))
+            cell.timeText:SetText(FormatTimeRemaining(pubExp))
         else
             cell.timeText:SetText("")
         end
@@ -1936,8 +1939,9 @@ local function RenderGridSection(panel, opts)
     -- activo), agregamos "  Xm" al titulo para que el user vea cuanto le queda
     -- a este buff sin tener que mirar la barra de buffs por separado.
     local titleStr = opts.title or ""
-    if opts.expirationTime and opts.expirationTime > GetTime() then
-        local timeStr = FormatTimeRemaining(opts.expirationTime)
+    local pubExp = ns.ToPublic(opts.expirationTime)
+    if pubExp and pubExp > GetTime() then
+        local timeStr = FormatTimeRemaining(pubExp)
         if timeStr ~= "" then titleStr = titleStr .. "  " .. timeStr end
     end
     if opts.statusOk == false then

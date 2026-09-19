@@ -118,8 +118,15 @@ local function HookCdmFrame(frame)
         local spellIDs = GetCdmFrameSpellIDs(self)
         local unit = self.auraDataUnit
         if #spellIDs == 0 or not unit then return end
+        -- 12.x: para auras "secret" (totems, algunos buffs de item) auraInstanceID
+        -- llega como secret number. Una tabla Lua normal NO acepta secret keys
+        -- ("attempted to index a table that cannot be indexed with secret keys"),
+        -- asi que lo pasamos por el sink FontString para obtener el numero publico.
+        -- Si no se puede recuperar, no hay forma de cachear/consultar esa aura
+        -- por instanceID: salimos sin tocar cdmData.
+        local instanceID = SiphonNumber(cdmAuraInstance.auraInstanceID)
+        if not instanceID or instanceID <= 0 then return end
         cdmData[unit] = cdmData[unit] or {}
-        local instanceID = cdmAuraInstance.auraInstanceID
         local existing = cdmData[unit][instanceID]
         if not existing or not existing.spellIDs or existing.spellIDs[1] ~= spellIDs[1] then
             cdmData[unit][instanceID] = {
@@ -140,8 +147,10 @@ local function CaptureCdmFrameState(frame)
     if not frame.cooldownInfo or not frame.cooldownID then return end
     local spellIDs = GetCdmFrameSpellIDs(frame)
     local unit = frame.auraDataUnit
-    local instanceID = rawget(frame, "auraInstanceID")
-    if #spellIDs > 0 and unit and type(instanceID) == "number" and instanceID > 0 then
+    -- rawget puede devolver un secret number (aura restringida): SiphonNumber lo
+    -- convierte a publico o devuelve nil, evitando el `> 0` que lanzaria error.
+    local instanceID = SiphonNumber(rawget(frame, "auraInstanceID"))
+    if #spellIDs > 0 and unit and instanceID and instanceID > 0 then
         cdmData[unit] = cdmData[unit] or {}
         if not cdmData[unit][instanceID] then
             cdmData[unit][instanceID] = {
@@ -427,15 +436,105 @@ local function SafePublicString(v)
     return v
 end
 
--- Reproduce un sonido cuando la aura recién aplicada coincide con una entry que
--- tenga playSound activo. Sólo se llama desde la rama addedAuras de
--- ProcessAuraUpdate, así que no dispara en zone-in / cambios de target / refreshes.
+-- ============================================================
+-- Loops de sonido como ALARMA segun la condicion de mostrar de la entry.
+--
+-- A diferencia del sonido one-shot (PlayAuraSoundIfEnabled, que suena UNA vez al
+-- APLICARSE el aura), el loop refleja la misma condicion `showWhen` que decide si
+-- el icono se muestra, y se evalua por TIMER (no por evento). Asi:
+--   - showWhen=MISSING + loop  -> alarma mientras el buff este CAIDO (caso tipico).
+--   - showWhen=ACTIVE  + loop  -> repite mientras el aura este activa.
+--   - BELOW_STACKS             -> mientras falte o este por debajo de minStacks.
+--   - ALWAYS                   -> solo mientras activo (no una alarma infinita).
+-- Es timer-driven e independiente del render: la alarma suena aunque el cursor
+-- display este oculto, y cubre tanto cursorAuras como ringAuras. PlaySound es
+-- one-shot (WoW no tiene flag de loop), por eso re-disparamos cada loopInterval.
+-- ============================================================
+local loopTickers = {}  -- entry table -> C_Timer ticker activo
+
+local function StopEntryLoop(entry)
+    local t = loopTickers[entry]
+    if t then
+        if t.Cancel then pcall(t.Cancel, t) end
+        loopTickers[entry] = nil
+    end
+end
+
+local function StopAllSoundLoops()
+    for entry in pairs(loopTickers) do StopEntryLoop(entry) end
+end
+ns.StopAllAuraSoundLoops = StopAllSoundLoops
+
+local function PlayEntrySound(entry)
+    ns.PlayAuraSound(entry.soundName or entry.soundID or 8959, entry.soundChannel or "Master")
+end
+
+local function StartEntryLoop(entry)
+    if loopTickers[entry] then return end  -- ya esta sonando
+    if not (C_Timer and C_Timer.NewTicker) then return end
+    local interval = tonumber(entry.loopInterval) or 2
+    if interval < 0.5 then interval = 0.5 end  -- guard anti-spam de audio
+    PlayEntrySound(entry)  -- primer toque inmediato; el ticker cubre las repeticiones
+    loopTickers[entry] = C_Timer.NewTicker(interval, function() PlayEntrySound(entry) end)
+end
+
+-- ¿El loop de esta entry deberia estar sonando AHORA? Mismo gating que el icono.
+local function EntryLoopShouldPlay(entry, inCombat)
+    if not (entry.enabled and entry.playSound and entry.loopSound and entry.spellID) then return false end
+    if not (ns.IsEntryAllowedForCurrentSpec(entry) and ns.IsEntryAllowedForRequiredTalent(entry)
+        and ns.IsEntryAllowedForCurrentInstance(entry)
+        and ns.MatchesVisibility(entry.visibility, inCombat)) then return false end
+    local status = ns:GetAuraStatus(entry.spellID, entry.unit, entry.filter, entry.manualDuration)
+    if not status then return false end
+
+    -- 1) Condicion por showWhen (igual que el icono).
+    local showWhen = entry.showWhen or "ALWAYS"
+    local byShow
+    if showWhen == "MISSING" then byShow = status.status == "MISSING"
+    elseif showWhen == "ACTIVE" then byShow = status.status == "ACTIVE"
+    elseif showWhen == "BELOW_STACKS" then byShow = status.status == "MISSING" or (status.stacks or 0) < (entry.minStacks or 0)
+    else byShow = status.status == "ACTIVE" end  -- ALWAYS: solo mientras activo
+    if byShow then return true end
+
+    -- 2) Aviso de expiracion: aura ACTIVA y por expirar dentro de loopExpireWarn seg.
+    -- Combina bien con showWhen=MISSING: la alarma arranca unos seg antes de caer y,
+    -- si se cae, sigue sonando sin corte (el ticker de la entry no se reinicia). El
+    -- mismo helper gobierna la aparicion del icono en el display (ns.IsExpiryWarn).
+    return ns.IsExpiryWarn(entry, status)
+end
+
+-- Evaluador periodico: arranca/para el loop de cada entry segun su condicion.
+local function EvaluateSoundLoops()
+    if not ns.db then return end
+    local inCombat = UnitAffectingCombat("player") and true or false
+    local seen = {}
+    local function walk(list)
+        for _, entry in ipairs(list or {}) do
+            if entry.playSound and entry.loopSound then seen[entry] = true end
+            if EntryLoopShouldPlay(entry, inCombat) then StartEntryLoop(entry)
+            else StopEntryLoop(entry) end
+        end
+    end
+    walk(ns.db.cursorAuras)
+    walk(ns.db.ringAuras)
+    -- Entries borradas / cambio de perfil: cortar loops que ya no estan en las listas.
+    for entry in pairs(loopTickers) do
+        if not seen[entry] then StopEntryLoop(entry) end
+    end
+end
+ns.EvaluateSoundLoops = EvaluateSoundLoops
+
+-- Sonido one-shot al APLICARSE un aura (solo rama addedAuras: no dispara en
+-- zone-in / target / refresh). Si la entry usa loopSound, el audio lo maneja el
+-- evaluador de loops (EvaluateSoundLoops); aca lo saltamos para no duplicar.
 local function PlayAuraSoundIfEnabled(unit, spellID)
     if not spellID or not unit or not ns.db then return end
     local function check(list)
         for _, e in ipairs(list or {}) do
             if e.spellID == spellID and e.unit == unit and e.playSound then
-                ns.PlayAuraSound(e.soundName or e.soundID or 8959)
+                if not e.loopSound then
+                    ns.PlayAuraSound(e.soundName or e.soundID or 8959, e.soundChannel or "Master")
+                end
                 return true
             end
         end
@@ -464,7 +563,19 @@ local function ShowAuraPulseIfEnabled(unit, spellID)
 end
 
 local function ProcessAuraUpdate(unit, updateInfo)
-    if updateInfo.isFullUpdate then
+    -- 12.1: cuando el UNIT_AURA event involucra un aura "secret" en el unit,
+    -- updateInfo.isFullUpdate llega como boolean secreto: ni siquiera el test
+    -- booleano directo es seguro sin pcall ("attempt to perform boolean test on
+    -- field 'isFullUpdate' (a secret boolean value, tainted)"). El dump del error
+    -- mostro que en ese mismo caso updateInfo.addedAuras tambien llega como
+    -- <secret table> (no enumerable). Si no podemos leer isFullUpdate con certeza,
+    -- forzamos el camino de full update: NO toca addedAuras/removedAuraInstanceIDs
+    -- (los campos riesgosos) y en cambio reconstruye el cache con un scan
+    -- independiente via AuraUtil.ForEachAura, que ya es seguro campo-por-campo
+    -- (ToPublic + pcall) para cada aura individual.
+    local okFull, isFull = pcall(function() return updateInfo.isFullUpdate and true or false end)
+    if not okFull then isFull = true end
+    if isFull then
         CacheClearUnit(unit)
         -- En isFullUpdate REAL (evento UNIT_AURA de Blizzard: zone change, login,
         -- /reload mid-buff) no llega removedAuraInstanceIDs — clear cdmData del
@@ -498,6 +609,11 @@ local function ProcessAuraUpdate(unit, updateInfo)
         end
         return
     end
+    -- Igual que isFullUpdate: en teoria addedAuras/removedAuraInstanceIDs tambien
+    -- podrian llegar como tabla secret si el update incremental toca un aura
+    -- restringida. pcall evita que ese caso (raro, pero mismo mecanismo) tiraria
+    -- abajo el resto del handler UNIT_AURA cada vez que ocurra.
+    pcall(function()
     if updateInfo.addedAuras then
         local idSet, nameSet = GetTrackedSets()
         for _, auraData in ipairs(updateInfo.addedAuras) do
@@ -513,12 +629,15 @@ local function ProcessAuraUpdate(unit, updateInfo)
             end
         end
     end
+    end)
+    pcall(function()
     if updateInfo.removedAuraInstanceIDs then
         for _, instanceID in ipairs(updateInfo.removedAuraInstanceIDs) do
             CacheRemoveByInstanceID(unit, instanceID)
             if cdmData[unit] then cdmData[unit][instanceID] = nil end
         end
     end
+    end)
 end
 
 local function FindAuraBySpellID(unit, spellID, filter)
@@ -590,20 +709,31 @@ local function FindAuraBySpellID(unit, spellID, filter)
             filtersToScan = { filter, "HELPFUL", "HARMFUL" }
         end
         for _, f in ipairs(filtersToScan) do
-            local cont
-            repeat
-                local slots = { C_UnitAuras.GetAuraSlots(unit, f, 50, cont) }
-                cont = slots[1]
-                for i = 2, #slots do
-                    local data = C_UnitAuras.GetAuraDataBySlot(unit, slots[i])
-                    if data then
-                        local sid = ns.ToPublic(data.spellId) or ns.ToPublic(data.spellID)
-                        if sid and sid == spellID then
-                            return data
+            -- 12.1: GetAuraSlots() ahora puede lanzar un error duro ("Auras cannot be
+            -- accessed when secret while tainted") en lugar de devolver spellId como
+            -- SecureNumber, cuando la lista de slots incluye un aura "secret" y el
+            -- codigo llamante esta tainted (el addon siempre lo esta desde su propio
+            -- OnUpdate). Sin pcall esto explota miles de veces por segundo via el
+            -- poll de RingDisplay/CursorDisplay. Tratamos ese filtro como "sin match"
+            -- y seguimos con el resto de los paths (p.ej. restrictedCdmInfo).
+            local ok, found = pcall(function()
+                local cont
+                repeat
+                    local slots = { C_UnitAuras.GetAuraSlots(unit, f, 50, cont) }
+                    cont = slots[1]
+                    for i = 2, #slots do
+                        local data = C_UnitAuras.GetAuraDataBySlot(unit, slots[i])
+                        if data then
+                            local sid = ns.ToPublic(data.spellId) or ns.ToPublic(data.spellID)
+                            if sid and sid == spellID then
+                                return data
+                            end
                         end
                     end
-                end
-            until not cont
+                until not cont
+                return nil
+            end)
+            if ok and found then return found end
         end
     end
     -- Ninguno de los 6 paths consiguio auraData. Si CDM tiene info "restricted"
@@ -911,6 +1041,10 @@ function ns:InitAuraMonitor()
             scanElapsed = 0
             FullScanAll(true) -- keepCdm: el scan periodico NO debe wipear cdmData (resetearia appliedAt cada 0.5s)
             ScanCdmViewers()
+            -- Alarma de sonido en loop segun la condicion showWhen de cada entry
+            -- (ej. "Mostrar solo cuando falta" => suena mientras el buff este caido).
+            -- Barato cuando no hay entries con loop (early-out antes de GetAuraStatus).
+            EvaluateSoundLoops()
         end
     end)
     -- Initial scan
@@ -1012,25 +1146,33 @@ function ns:ListAuras(args)
     -- usePackedAura=true), asi tenemos acceso confiable a spellId/name/source.
     if C_UnitAuras and C_UnitAuras.GetAuraSlots and C_UnitAuras.GetAuraDataBySlot then
         for _, filter in ipairs({"HELPFUL", "HARMFUL"}) do
-            local cont = nil
-            repeat
-                local slots = { C_UnitAuras.GetAuraSlots(unit, filter, 50, cont) }
-                cont = slots[1]
-                for i = 2, #slots do
-                    local data = C_UnitAuras.GetAuraDataBySlot(unit, slots[i])
-                    if data then
-                        local sid = data.spellId or data.spellID
-                        local name = data.name or "?"
-                        local src = data.sourceUnit or "?"
-                        local dur = ns.ToPublic(data.duration) or 0
-                        local exp = ns.ToPublic(data.expirationTime) or 0
-                        local rem = (exp > 0) and (exp - GetTime()) or 0
-                        print(string.format("  [%s] %s |cff888888id=%s|r src=%s dur=%.1fs rem=%.1fs",
-                            filter, tostring(name), tostring(sid), tostring(src), dur, rem))
-                        found = found + 1
+            -- 12.1: GetAuraSlots() puede lanzar "Auras cannot be accessed when secret
+            -- while tainted" si la lista incluye un aura secret. pcall evita que /hht
+            -- listauras crashee a mitad de la iteracion.
+            local ok = pcall(function()
+                local cont = nil
+                repeat
+                    local slots = { C_UnitAuras.GetAuraSlots(unit, filter, 50, cont) }
+                    cont = slots[1]
+                    for i = 2, #slots do
+                        local data = C_UnitAuras.GetAuraDataBySlot(unit, slots[i])
+                        if data then
+                            local sid = data.spellId or data.spellID
+                            local name = data.name or "?"
+                            local src = data.sourceUnit or "?"
+                            local dur = ns.ToPublic(data.duration) or 0
+                            local exp = ns.ToPublic(data.expirationTime) or 0
+                            local rem = (exp > 0) and (exp - GetTime()) or 0
+                            print(string.format("  [%s] %s |cff888888id=%s|r src=%s dur=%.1fs rem=%.1fs",
+                                filter, tostring(name), tostring(sid), tostring(src), dur, rem))
+                            found = found + 1
+                        end
                     end
-                end
-            until not cont
+                until not cont
+            end)
+            if not ok then
+                print(string.format("  |cffff8800[%s] iteracion interrumpida (aura secret + tainted)|r", filter))
+            end
         end
     elseif AuraUtil and AuraUtil.ForEachAura then
         -- Fallback con la firma correcta: usePackedAura=true (5to argumento) para

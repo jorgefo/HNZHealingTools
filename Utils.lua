@@ -29,6 +29,17 @@ function ns.MatchesVisibility(vis, inCombat)
     return true
 end
 
+-- True si la entry tiene "aviso de expiracion" (loopExpireWarn>0) configurado y el
+-- aura, segun `status`, esta ACTIVA y por expirar dentro de esos segundos. Mismo
+-- criterio que dispara la alarma de sonido y que muestra el icono en el display,
+-- para que ambos queden siempre en sync. result.remaining es numero publico.
+function ns.IsExpiryWarn(entry, status)
+    local warn = tonumber(entry and entry.loopExpireWarn) or 0
+    if warn <= 0 or not status or status.status ~= "ACTIVE" then return false end
+    local rem = status.remaining
+    return (rem and rem > 0 and rem <= warn) and true or false
+end
+
 function ns.FormatDuration(seconds)
     if type(seconds) ~= "number" or seconds <= 0 then return "" end
     if seconds >= 60 then

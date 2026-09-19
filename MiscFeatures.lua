@@ -31,6 +31,9 @@ local crFrame             -- frame del indicador de brez del grupo (el draggable
 local reincFrame          -- frame de Reencarnación (anclado a la derecha del brez)
 local moveMode = false    -- desbloqueado para arrastrar libremente + muestra dummy
 local REINC_GAP = 6       -- separación entre el icono de brez y el de reinc
+local brezEventFrame      -- frame de eventos (asignado en InitMiscFeatures); las
+                          -- funciones Brez* lo usan para (des)registrar CLEU lazy
+local cleuRegistered = false
 
 -- El icono de auto-res (reinc) aparece para quien CONOZCA el hechizo, no por clase
 -- ("a menos que tengan el mismo hechizo del chaman"). Hoy solo Chamán tiene
@@ -98,16 +101,50 @@ local function BrezTick()
     end
 end
 
+-- COMBAT_LOG_EVENT_UNFILTERED se registra LAZY, no en el login. Registrarlo desde
+-- la cadena de PLAYER_LOGIN dispara ADDON_ACTION_FORBIDDEN: CLEU es un evento
+-- protegido y el path de login suele estar tainteado por otros addons, lo que
+-- bloquea el registro. Un pcall atrapa el error de Lua pero NO impide que el motor
+-- dispare el evento ADDON_ACTION_FORBIDDEN (BugGrabber lo loguea igual). En cambio,
+-- registrandolo recien cuando el pool de brez se activa —dentro de un dispatch de
+-- evento limpio (ENCOUNTER_START / PLAYER_ENTERING_WORLD / CHALLENGE_MODE_START)—
+-- el registro tiene exito sin disparar nada. Bonus: CLEU solo procesa mientras
+-- hace falta (el handler ya guardaba con `if not brez.active then return end`).
+local function EnableBrezCLEU()
+    if cleuRegistered or not brezEventFrame then return end
+    -- Marcamos antes de diferir para no reintentar (ni re-disparar el evento) si en
+    -- algun entorno el registro siguiera prohibido. Se reintenta tras Disable.
+    cleuRegistered = true
+    -- 12.1: incluso disparado desde un evento "limpio" (CHALLENGE_MODE_START,
+    -- ENCOUNTER_START, PLAYER_ENTERING_WORLD) el RegisterEvent puede seguir
+    -- dando ADDON_ACTION_FORBIDDEN si ese tick en particular comparte call stack
+    -- con codigo tainted de Blizzard u otro addon (ej. la animacion de apertura
+    -- de la puerta de M+ dispara CHALLENGE_MODE_START ya tainted). C_Timer.After(0, ...)
+    -- despacha el registro en un call stack nuevo y limpio — mismo mecanismo que
+    -- ya usamos para el UpdateAll inicial de InitMiscFeatures.
+    C_Timer.After(0, function()
+        pcall(brezEventFrame.RegisterEvent, brezEventFrame, "COMBAT_LOG_EVENT_UNFILTERED")
+    end)
+end
+
+local function DisableBrezCLEU()
+    if not cleuRegistered or not brezEventFrame then return end
+    cleuRegistered = false
+    pcall(brezEventFrame.UnregisterEvent, brezEventFrame, "COMBAT_LOG_EVENT_UNFILTERED")
+end
+
 local function BrezActivate()
     brez.active = true
     brez.charges = 1
     brez.rechargeDur = BrezRechargeDuration()
     brez.rechargeStart = GetTime()
+    EnableBrezCLEU()
 end
 
 local function BrezDeactivate()
     brez.active = false
     brez.charges = 0
+    DisableBrezCLEU()
 end
 
 local function BrezConsume()
@@ -412,24 +449,33 @@ function ns:InitMiscFeatures()
     ApplyPlacement()
 
     local ev = CreateFrame("Frame")
-    ev:RegisterEvent("SPELL_UPDATE_CHARGES")
-    ev:RegisterEvent("SPELL_UPDATE_COOLDOWN")
-    ev:RegisterEvent("PLAYER_ENTERING_WORLD")
-    ev:RegisterEvent("PLAYER_DEAD")
-    ev:RegisterEvent("PLAYER_ALIVE")
-    ev:RegisterEvent("PLAYER_UNGHOST")
-    ev:RegisterEvent("GROUP_ROSTER_UPDATE")
+    brezEventFrame = ev  -- referencia para que Enable/DisableBrezCLEU registren CLEU lazy
+    -- RegisterEvent puede dar ADDON_ACTION_FORBIDDEN cuando el path de ejecucion
+    -- del login quedo tainteado por otro addon. pcall evita que un registro
+    -- bloqueado aborte InitMiscFeatures (y con el, el resto del login) — mismo
+    -- patron defensivo que InitAuraMonitor. NOTA: COMBAT_LOG_EVENT_UNFILTERED NO se
+    -- registra aqui; es un evento protegido y registrarlo en el login dispara el
+    -- evento ADDON_ACTION_FORBIDDEN aun envuelto en pcall (el pcall atrapa el error
+    -- de Lua pero no impide que el motor dispare el evento, que BugGrabber loguea).
+    -- Se registra lazy en BrezActivate (EnableBrezCLEU), ya en un dispatch limpio.
+    local function Reg(e) pcall(ev.RegisterEvent, ev, e) end
+    Reg("SPELL_UPDATE_CHARGES")
+    Reg("SPELL_UPDATE_COOLDOWN")
+    Reg("PLAYER_ENTERING_WORLD")
+    Reg("PLAYER_DEAD")
+    Reg("PLAYER_ALIVE")
+    Reg("PLAYER_UNGHOST")
+    Reg("GROUP_ROSTER_UPDATE")
     -- Estado del pool manual de brez:
-    ev:RegisterEvent("ENCOUNTER_START")
-    ev:RegisterEvent("ENCOUNTER_END")
-    ev:RegisterEvent("CHALLENGE_MODE_START")
-    ev:RegisterEvent("CHALLENGE_MODE_COMPLETED")
-    ev:RegisterEvent("CHALLENGE_MODE_RESET")
-    ev:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
+    Reg("ENCOUNTER_START")
+    Reg("ENCOUNTER_END")
+    Reg("CHALLENGE_MODE_START")
+    Reg("CHALLENGE_MODE_COMPLETED")
+    Reg("CHALLENGE_MODE_RESET")
     -- Aprender/olvidar el hechizo de auto-res o cambiar de spec puede cambiar si
     -- corresponde mostrar el icono de reinc → revalidar.
-    ev:RegisterEvent("SPELLS_CHANGED")
-    ev:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
+    Reg("SPELLS_CHANGED")
+    Reg("PLAYER_SPECIALIZATION_CHANGED")
     ev:SetScript("OnEvent", function(_, event)
         if event == "ENCOUNTER_START" then
             -- Pull de boss en raid: el pool se resetea a 1 carga.
@@ -483,6 +529,15 @@ function ns:InitMiscFeatures()
         cr.placed = true
         ns:SetMiscCombatResMove(true)
     else
-        UpdateAll()
+        -- Si el reload ocurre YA dentro de contenido con pool (raid/M+), UpdateAll
+        -- -> UpdateCR encuentra brez.active=false y llama BrezActivate() ->
+        -- EnableBrezCLEU() -> RegisterEvent(COMBAT_LOG_EVENT_UNFILTERED) en el
+        -- mismo call stack sincrono que InitMiscFeatures, que todavia cuelga del
+        -- chain de login/ADDON_LOADED. Igual que el CLEU (comentario mas arriba),
+        -- eso dispara ADDON_ACTION_FORBIDDEN aunque este envuelto en pcall.
+        -- C_Timer.After(0, ...) despacha el callback en un call stack nuevo y
+        -- limpio, evitando el taint heredado; PLAYER_ENTERING_WORLD igual
+        -- reactiva el pool poco despues si este primer intento se pierde.
+        C_Timer.After(0, UpdateAll)
     end
 end
